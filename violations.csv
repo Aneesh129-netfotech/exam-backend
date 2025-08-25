@@ -1,0 +1,3 @@
+candidate_id,exam_id,candidate_name,tab_switches,inactivities,text_selections,copies,pastes,right_clicks
+user123,exam1,John Doe,2,1,0,1,0,0
+user456,exam1,Jane Smith,0,2,1,0,1,0
