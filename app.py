@@ -100,16 +100,24 @@ def submit_test():
     try:
         data = request.get_json()
 
-        # Save exam results in `results` table
+        # Save exam results including violations
         payload = {
             "question_set_id": data.get("question_set_id"),
             "candidate_name": data.get("candidate_name"),
             "candidate_email": data.get("candidate_email"),
             "score": data.get("score", 0),
-            "violations": data.get("violations", {}),
+            "duration_used_seconds": data.get("duration_used", 0),
+            # Map violations to individual columns
+            "tab_switches": data.get("violations", {}).get("tabSwitches", 0),
+            "inactivities": data.get("violations", {}).get("windowMinimizations", 0),
+            "text_selections": data.get("violations", {}).get("textSelections", 0),
+            "copies": data.get("violations", {}).get("copies", 0),
+            "pastes": data.get("violations", {}).get("pastes", 0),
+            "right_clicks": data.get("violations", {}).get("rightClicks", 0),
+            "face_not_visible": data.get("violations", {}).get("noFace", 0),
         }
-        response = supabase.table("results").insert(payload).execute()
 
+        response = supabase.table("results").insert(payload).execute()
         return jsonify({"status": "success", "saved_data": response.data})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
