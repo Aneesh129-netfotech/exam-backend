@@ -1,10 +1,8 @@
-# events.py
 from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
 import os
 
-# Load .env variables
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -27,19 +25,14 @@ VALID_COLUMNS = {
 
 LEGACY_MAP = {
     "tab_switch": "tab_switches",
-    "tab_switches": "tab_switches",
     "inactivity": "inactivities",
-    "inactivities": "inactivities",
     "text_selection": "text_selections",
-    "text_selections": "text_selections",
     "copy": "copies",
-    "copies": "copies",
     "paste": "pastes",
-    "pastes": "pastes",
     "right_click": "right_clicks",
-    "right_clicks": "right_clicks",
     "face_not_visible": "face_not_visible",
 }
+
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
@@ -61,7 +54,7 @@ def register_socket_events(socketio: SocketIO):
                 print("⚠️ missing question_set_id or candidate_email")
                 return
 
-            # normalize counts
+            # Normalize counts
             counts = data.get("counts")
             if not counts:
                 vt = data.get("violation_type")
@@ -90,24 +83,28 @@ def register_socket_events(socketio: SocketIO):
 
             if res.data:
                 row = res.data[0]
-                # accumulate into existing row
-                update_payload = {}
-                for col, inc in increments.items():
-                    update_payload[col] = int(row.get(col, 0)) + inc
+                # Append violations to raw_feedback
+                prev_feedback = row.get("raw_feedback", "") or ""
+                violation_log = "\n".join([f"{col}: +{inc}" for col, inc in increments.items()])
+                new_feedback = prev_feedback + f"\n[VIOLATION] {violation_log}"
 
-                supabase.table("results").update(update_payload).eq("id", row["id"]).execute()
-                payload = {**row, **update_payload}
+                supabase.table("results").update({
+                    "raw_feedback": new_feedback
+                }).eq("id", row["id"]).execute()
+
+                payload = {**row, "raw_feedback": new_feedback}
             else:
-                # create fresh row (in case results not created yet)
+                # Create fresh row if not exists
+                violation_log = "\n".join([f"{col}: {inc}" for col, inc in increments.items()])
                 payload = {
                     "question_set_id": question_set_id,
                     "candidate_name": candidate_name,
                     "candidate_email": candidate_email,
-                    **{col: increments.get(col, 0) for col in VALID_COLUMNS},
+                    "raw_feedback": f"[VIOLATION] {violation_log}"
                 }
-                supabase.table("test_results").insert(payload).execute()
+                supabase.table("results").insert(payload).execute()
 
-            # broadcast update
+            # Broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
