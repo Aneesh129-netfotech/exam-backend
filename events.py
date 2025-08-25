@@ -1,3 +1,4 @@
+# events.py
 from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
@@ -67,11 +68,12 @@ def register_socket_events(socketio: SocketIO):
                     return
                 counts = {col: 1}
 
+            # Keep only valid columns with positive counts
             increments = {k: int(v) for k, v in counts.items() if k in VALID_COLUMNS and int(v) > 0}
             if not increments:
                 return
 
-            # Fetch result row for candidate
+            # Fetch existing result row for candidate
             res = (
                 supabase.table("results")
                 .select("*")
@@ -83,16 +85,20 @@ def register_socket_events(socketio: SocketIO):
 
             if res.data:
                 row = res.data[0]
-                # Append violations to raw_feedback
                 prev_feedback = row.get("raw_feedback", "") or ""
                 violation_log = "\n".join([f"{col}: +{inc}" for col, inc in increments.items()])
                 new_feedback = prev_feedback + f"\n[VIOLATION] {violation_log}"
 
+                # Increment numeric violation columns
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments.keys()}
+
                 supabase.table("results").update({
-                    "raw_feedback": new_feedback
+                    "raw_feedback": new_feedback,
+                    **numeric_updates
                 }).eq("id", row["id"]).execute()
 
-                payload = {**row, "raw_feedback": new_feedback}
+                payload = {**row, "raw_feedback": new_feedback, **numeric_updates}
+
             else:
                 # Create fresh row if not exists
                 violation_log = "\n".join([f"{col}: {inc}" for col, inc in increments.items()])
@@ -100,7 +106,8 @@ def register_socket_events(socketio: SocketIO):
                     "question_set_id": question_set_id,
                     "candidate_name": candidate_name,
                     "candidate_email": candidate_email,
-                    "raw_feedback": f"[VIOLATION] {violation_log}"
+                    "raw_feedback": f"[VIOLATION] {violation_log}",
+                    **{col: increments.get(col, 0) for col in increments.keys()},
                 }
                 supabase.table("results").insert(payload).execute()
 
@@ -111,7 +118,7 @@ def register_socket_events(socketio: SocketIO):
                 **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
-            print(f"✅ violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
 
         except Exception as e:
             print(f"❌ Failed to upsert violation batch: {e}")
