@@ -24,9 +24,9 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "defaultsecret")
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+# ✅ Use eventlet for proper websocket support
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 register_socket_events(socketio)
-
 
 @app.route("/")
 def index():
@@ -106,6 +106,7 @@ def submit_test():
             "candidate_name": data.get("candidate_name"),
             "candidate_email": data.get("candidate_email"),
             "score": data.get("score", 0),
+            "violations": data.get("violations", {}),
         }
         response = supabase.table("results").insert(payload).execute()
 
@@ -131,4 +132,4 @@ def get_result_with_violations(question_set_id, candidate_email):
 
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False)
