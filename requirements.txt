@@ -1,5 +1,9 @@
 flask
 flask-socketio
 flask-cors
+python-dotenv
+supabase
+pandas
+pydantic
 eventlet
-dotenv
+httpx
