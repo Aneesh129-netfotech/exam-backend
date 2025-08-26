@@ -141,7 +141,7 @@ def submit_test():
 @app.route("/api/results/<question_set_id>/<candidate_email>", methods=["GET"])
 def get_result_with_violations(question_set_id, candidate_email):
     try:
-        res = supabase.table("results").select("*") \
+        res = supabase.table("test_results").select("*") \
             .eq("question_set_id", question_set_id) \
             .eq("candidate_email", candidate_email) \
             .limit(1).execute()
