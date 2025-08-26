@@ -102,48 +102,24 @@ def submit_test():
     try:
         data = request.get_json()
 
+        # Collect violations safely
         violations = {
-            "tab_switches": data.get("tab_switches", 0),
-            "inactivities": data.get("inactivities", 0),
-            "text_selections": data.get("text_selections", 0),
-            "copies": data.get("copies", 0),
-            "pastes": data.get("pastes", 0),
-            "right_clicks": data.get("right_clicks", 0),
-            "face_not_visible": data.get("face_not_visible", 0),
+            "tab_switches": int(data.get("tab_switches", 0)),
+            "inactivities": int(data.get("inactivities", 0)),
+            "text_selections": int(data.get("text_selections", 0)),
+            "copies": int(data.get("copies", 0)),
+            "pastes": int(data.get("pastes", 0)),
+            "right_clicks": int(data.get("right_clicks", 0)),
+            "face_not_visible": int(data.get("face_not_visible", 0)),
         }
-
         total_violations = sum(violations.values())
 
-        sql = """
-        INSERT INTO test_results (
-            tab_switches,
-            inactivities,
-            text_selections,
-            copies,
-            pastes,
-            right_clicks,
-            face_not_visible,
-            violations
-        ) VALUES (
-            %(tab_switches)s,
-            %(inactivities)s,
-            %(text_selections)s,
-            %(copies)s,
-            %(pastes)s,
-            %(right_clicks)s,
-            %(face_not_visible)s,
-            %(violations)s
-        )
-        RETURNING *;
-        """
-
+        # ✅ Build params matching Supabase schema
         params = {
             "id": str(uuid.uuid4()),
-            "candidate_id": data.get("candidate_id"),
-            "candidate_name": data.get("candidate_name"),
-            "candidate_email": data.get("candidate_email"),
             "question_set_id": data.get("question_set_id"),
-            "max_score": data.get("max_score", 0),
+            "score": data.get("score", 0),
+            "max_score": data.get("max_score", len(data.get("questions", [])) * 10),
             "percentage": data.get("percentage", 0.0),
             "status": data.get("status", "Pending"),
             "total_questions": data.get("total_questions", len(data.get("questions", []))),
@@ -153,34 +129,23 @@ def submit_test():
             "updated_at": datetime.utcnow().isoformat(),
             "duration_used_seconds": data.get("duration_used", 0),
             "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
+            "candidate_id": data.get("candidate_id"),
+            "candidate_email": data.get("candidate_email"),
+            "candidate_name": data.get("candidate_name"),
             **violations,
             "violations": total_violations,
         }
 
-        # 🚨 Using Supabase PostgREST directly doesn’t allow raw SQL
-        # You’ll need a Postgres connection string OR Supabase function (rpc)
-        response = supabase.postgrest.rpc("exec_sql", {"sql": sql, "params": params}).execute()
+        # ✅ Insert directly into Supabase
+        response = supabase.table("test_results").insert(params).execute()
 
-        return jsonify({"status": "success", "saved": response.data})
-    
+        return jsonify({
+            "status": "success",
+            "saved": response.data[0] if response.data else None
+        })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route("/api/results/<question_set_id>/<candidate_email>", methods=["GET"])
-def get_result_with_violations(question_set_id, candidate_email):
-    try:
-        res = supabase.table("test_results").select("*") \
-            .eq("question_set_id", question_set_id) \
-            .eq("candidate_email", candidate_email) \
-            .limit(1).execute()
-
-        if not res.data:
-            return jsonify({"error": "Result not found"}), 404
-
-        return jsonify(res.data[0])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
