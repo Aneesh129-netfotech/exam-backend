@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -9,7 +10,7 @@ from supabase import create_client
 from datetime import datetime
 import uuid
 
-from events import register_socket_events
+from events import register_socket_events, normalize_violations, VALID_COLUMNS
 from test_generator import generate_questions, TestRequest
 
 load_dotenv()
@@ -29,6 +30,7 @@ log.setLevel(logging.ERROR)
 # ✅ Use eventlet for proper websocket support
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 register_socket_events(socketio)
+
 
 @app.route("/")
 def index():
@@ -102,19 +104,9 @@ def submit_test():
     try:
         data = request.get_json()
 
-        # Collect violations safely
-        violations = {
-            "tab_switches": int(data.get("tab_switches", 0)),
-            "inactivities": int(data.get("inactivities", 0)),
-            "text_selections": int(data.get("text_selections", 0)),
-            "copies": int(data.get("copies", 0)),
-            "pastes": int(data.get("pastes", 0)),
-            "right_clicks": int(data.get("right_clicks", 0)),
-            "face_not_visible": int(data.get("face_not_visible", 0)),
-        }
+        violations = normalize_violations(data)
         total_violations = sum(violations.values())
 
-        # ✅ Build params matching Supabase schema
         params = {
             "id": str(uuid.uuid4()),
             "question_set_id": data.get("question_set_id"),
@@ -132,11 +124,10 @@ def submit_test():
             "candidate_id": data.get("candidate_id"),
             "candidate_email": data.get("candidate_email"),
             "candidate_name": data.get("candidate_name"),
-            **violations,
+            **{col: violations.get(col, 0) for col in VALID_COLUMNS},
             "violations": total_violations,
         }
 
-        # ✅ Insert directly into Supabase
         response = supabase.table("test_results").insert(params).execute()
 
         return jsonify({
@@ -146,6 +137,7 @@ def submit_test():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
