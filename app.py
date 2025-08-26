@@ -133,29 +133,27 @@ def submit_test():
         payload = {
             "id": str(uuid.uuid4()),
             "question_set_id": data.get("question_set_id"),
-            "score": int(data.get("score", 0)),
-            "max_score": len(data.get("questions", [])) * 10,
-            "percentage": round((int(data.get("score", 0)) / max(len(data.get("questions", [])) * 10, 1)) * 100, 2),
-            "status": "Completed",
-            "total_questions": len(data.get("questions", [])),
-            "raw_feedback": "",  # You can add detailed feedback here if needed
-            "evaluated_at": now,
+            "max_score": data.get("max_score", 0),
+            "percentage": data.get("percentage", 0.0),
+            "status": data.get("status", "Pending"),
+            "total_questions": data.get("total_questions", len(data.get("questions", []))),
+            "raw_feedback": data.get("raw_feedback", ""),
+            "evaluated_at": data.get("evaluated_at", now),
             "created_at": now,
             "updated_at": now,
-            "duration_used_seconds": int(data.get("duration_used", 0)),
-            "duration_used_minutes": round(int(data.get("duration_used", 0)) / 60, 2),
+            "duration_used_seconds": data.get("duration_used", 0),
+            "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
             "candidate_id": data.get("candidate_id"),
             "candidate_email": data.get("candidate_email"),
             "candidate_name": data.get("candidate_name"),
-            
-            # Add violations explicitly
-            "tab_switches": violations_received["tab_switches"],
-            "inactivities": violations_received["inactivities"],
-            "text_selections": violations_received["text_selections"],
-            "copies": violations_received["copies"],
-            "pastes": violations_received["pastes"],
-            "right_clicks": violations_received["right_clicks"],
-            "face_not_visible": violations_received["face_not_visible"],
+            # Violations
+            "tab_switches": data.get("tab_switches", 0),
+            "inactivities": data.get("inactivities", 0),
+            "text_selections": data.get("text_selections", 0),
+            "copies": data.get("copies", 0),
+            "pastes": data.get("pastes", 0),
+            "right_clicks": data.get("right_clicks", 0),
+            "face_not_visible": data.get("face_not_visible", 0),
         }
         
         print(f"\nFINAL PAYLOAD:")
