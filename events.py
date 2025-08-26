@@ -3,7 +3,7 @@ from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
 import os
-import datetime
+from datetime import datetime
 import uuid
 
 load_dotenv()
@@ -37,6 +37,39 @@ LEGACY_MAP = {
 }
 
 
+def normalize_violations(data: dict) -> dict:
+    """
+    Normalize incoming violation data into {column: int}.
+    Supports:
+      - { "violations": {...} }
+      - { "counts": {...} }
+      - flat columns (tab_switches=7, etc.)
+      - legacy { "violation_type": "tab_switch" }
+    """
+    counts = data.get("violations") or data.get("counts")
+
+    # If violations is just an int (total), ignore it
+    if isinstance(counts, int):
+        counts = None
+
+    if not counts:
+        # Try flat keys
+        counts = {col: data.get(col, 0) for col in VALID_COLUMNS}
+
+    # Legacy single-event format
+    if not any(counts.values()):
+        vt = data.get("violation_type")
+        if vt:
+            col = LEGACY_MAP.get(vt)
+            if col:
+                counts = {col: 1}
+
+    increments = {
+        k: int(v) for k, v in counts.items()
+        if k in VALID_COLUMNS and v is not None and int(v) > 0
+    }
+    return increments
+
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
     def handle_connect():
@@ -57,21 +90,7 @@ def register_socket_events(socketio: SocketIO):
                 print("⚠️ missing question_set_id or candidate_email")
                 return
 
-            # Normalize counts
-            counts = data.get("counts")
-            if not counts:
-                vt = data.get("violation_type")
-                if not vt:
-                    print("⚠️ Ignoring event: missing counts/violation_type")
-                    return
-                col = LEGACY_MAP.get(vt)
-                if not col:
-                    print(f"⚠️ Unknown violation type: {vt}")
-                    return
-                counts = {col: 1}
-
-            # Only keep valid + positive
-            increments = {k: int(v) for k, v in counts.items() if k in VALID_COLUMNS and int(v) > 0}
+            increments = normalize_violations(data)
             if not increments:
                 return
 
@@ -92,10 +111,11 @@ def register_socket_events(socketio: SocketIO):
                 violation_log = "\n".join([f"{col}: +{inc}" for col, inc in increments.items()])
                 new_feedback = prev_feedback + f"\n[VIOLATION] {violation_log}"
 
-                # Increment per-column
-                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments.keys()}
+                numeric_updates = {
+                    col: row.get(col, 0) + increments.get(col, 0)
+                    for col in increments.keys()
+                }
 
-                # ✅ Also update total violations
                 new_total_violations = row.get("violations", 0) + sum(increments.values())
 
                 supabase.table("test_results").update({
@@ -108,7 +128,7 @@ def register_socket_events(socketio: SocketIO):
                 payload = {**row, "raw_feedback": new_feedback, **numeric_updates, "violations": new_total_violations}
 
             else:
-                # 🆕 Insert fresh row (ensure required columns exist!)
+                # 🆕 Fresh row
                 violation_log = "\n".join([f"{col}: {inc}" for col, inc in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
@@ -129,7 +149,7 @@ def register_socket_events(socketio: SocketIO):
                 }
                 supabase.table("test_results").insert(payload).execute()
 
-            # Broadcast
+            # Broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
