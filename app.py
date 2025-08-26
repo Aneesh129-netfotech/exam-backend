@@ -10,7 +10,7 @@ from supabase import create_client
 from datetime import datetime
 import uuid
 
-from events import register_socket_events, normalize_violations, VALID_COLUMNS
+from events import register_socket_events, VALID_COLUMNS
 from test_generator import generate_questions, TestRequest
 
 load_dotenv()
@@ -27,7 +27,7 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "defaultsecret")
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
-# ✅ Use eventlet for proper websocket support
+# Use eventlet for proper websocket support
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 register_socket_events(socketio)
 
@@ -104,9 +104,7 @@ def submit_test():
     try:
         data = request.get_json()
 
-        violations = normalize_violations(data)
-        total_violations = sum(violations.values())
-
+        # Insert individual violation fields only
         params = {
             "id": str(uuid.uuid4()),
             "question_set_id": data.get("question_set_id"),
@@ -124,8 +122,7 @@ def submit_test():
             "candidate_id": data.get("candidate_id"),
             "candidate_email": data.get("candidate_email"),
             "candidate_name": data.get("candidate_name"),
-            **{col: violations.get(col, 0) for col in VALID_COLUMNS},
-            "violations": total_violations,
+            **{col: data.get(col, 0) for col in VALID_COLUMNS},
         }
 
         response = supabase.table("test_results").insert(params).execute()
@@ -138,6 +135,7 @@ def submit_test():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
     """
@@ -147,19 +145,8 @@ def insert_manual_violations():
         data = request.get_json()
         print(f"📥 Manual violation insert request: {data}")
         
-        # Extract violation counts from the request
-        violations = {
-            "tab_switches": data.get("tab_switches", 0),
-            "inactivities": data.get("inactivities", 0), 
-            "text_selections": data.get("text_selections", 0),
-            "copies": data.get("copies", 0),
-            "pastes": data.get("pastes", 0),
-            "right_clicks": data.get("right_clicks", 0),
-            "face_not_visible": data.get("face_not_visible", 0),
-        }
-        
-        # Calculate total violations
-        total_violations = sum(violations.values())
+        # Extract individual violation counts
+        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         
         # Prepare the record
         params = {
@@ -179,8 +166,7 @@ def insert_manual_violations():
             "duration_used_seconds": data.get("duration_used_seconds", 0),
             "duration_used_minutes": data.get("duration_used_minutes", 0),
             "candidate_id": data.get("candidate_id"),
-            **violations,  # Add all violation columns
-            "violations": total_violations,
+            **violations,  # individual columns only
         }
         
         print(f"📝 Inserting manual violation record: {params}")
@@ -194,8 +180,7 @@ def insert_manual_violations():
                 "status": "success",
                 "message": "Manual violation record created successfully",
                 "data": response.data[0],
-                "violations_summary": violations,
-                "total_violations": total_violations
+                "violations_summary": violations
             })
         else:
             return jsonify({"error": "Failed to create record"}), 500
@@ -217,6 +202,7 @@ def test_violations_endpoint():
         "timestamp": datetime.utcnow().isoformat(),
         "valid_columns": list(VALID_COLUMNS)
     })
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
