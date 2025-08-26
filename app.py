@@ -99,17 +99,23 @@ def generate_test_route():
 def submit_test():
     try:
         data = request.get_json()
-        
-        print("Received data:", data)  # Debug log
-
-        # Save exam results including violations
+        print("Received data:", data)
+ 
         payload = {
-            "question_set_id": data.get("question_set_id"),
+            "candidate_id": data.get("candidate_id"),
             "candidate_name": data.get("candidate_name"),
             "candidate_email": data.get("candidate_email"),
+            "question_set_id": data.get("question_set_id"),
             "score": data.get("score", 0),
+            "max_score": data.get("max_score", 0),
+            "percentage": data.get("percentage", 0.0),
+            "status": data.get("status", "Pending"),
+            "total_questions": data.get("total_questions", len(data.get("questions", []))),
+            "raw_feedback": data.get("raw_feedback", ""),
+            "evaluated_at": data.get("evaluated_at"),
             "duration_used_seconds": data.get("duration_used", 0),
-            # Get violations directly from flat structure (not nested)
+            "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
+            # Violations
             "tab_switches": data.get("tab_switches", 0),
             "inactivities": data.get("inactivities", 0),
             "text_selections": data.get("text_selections", 0),
@@ -118,13 +124,13 @@ def submit_test():
             "right_clicks": data.get("right_clicks", 0),
             "face_not_visible": data.get("face_not_visible", 0),
         }
-
-        print("Payload to insert:", payload)  # Debug log
-
+ 
+        print("Payload to insert:", payload)
+ 
         response = supabase.table("results").insert(payload).execute()
         return jsonify({"status": "success", "saved_data": response.data})
     except Exception as e:
-        print("Error submitting test:", str(e))  # Debug log
+        print("Error submitting test:", str(e))
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/results/<question_set_id>/<candidate_email>", methods=["GET"])
