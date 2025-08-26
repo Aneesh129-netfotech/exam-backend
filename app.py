@@ -101,52 +101,8 @@ def generate_test_route():
 def submit_test():
     try:
         data = request.get_json()
-        
-        print("\n" + "="*60)
-        print("FLASK: DETAILED SUBMISSION DEBUG")
-        print("="*60)
-        print(f"Raw data received: {data}")
-        
-        # Validate we have data
-        if not data:
-            print("ERROR: No data received")
-            return jsonify({"error": "No data received"}), 400
-        
-        # Check for violations specifically
-        violations_received = {}
-        violation_fields = ["tab_switches", "inactivities", "text_selections", 
-                          "copies", "pastes", "right_clicks", "face_not_visible"]
-        
-        print("\nVIOLATIONS CHECK:")
-        for field in violation_fields:
-            value = data.get(field, 0)
-            violations_received[field] = int(value) if value is not None else 0
-            print(f"  {field}: {value} -> {violations_received[field]} (type: {type(violations_received[field])})")
-        
-        # Calculate totals for verification
-        total_violations = sum(violations_received.values())
-        print(f"\nTotal violations: {total_violations}")
-        
-        now = datetime.utcnow().isoformat()
-        
-        # Build payload
-        payload = {
-            "id": str(uuid.uuid4()),
-            "question_set_id": data.get("question_set_id"),
-            "max_score": data.get("max_score", 0),
-            "percentage": data.get("percentage", 0.0),
-            "status": data.get("status", "Pending"),
-            "total_questions": data.get("total_questions", len(data.get("questions", []))),
-            "raw_feedback": data.get("raw_feedback", ""),
-            "evaluated_at": data.get("evaluated_at", now),
-            "created_at": now,
-            "updated_at": now,
-            "duration_used_seconds": data.get("duration_used", 0),
-            "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
-            "candidate_id": data.get("candidate_id"),
-            "candidate_email": data.get("candidate_email"),
-            "candidate_name": data.get("candidate_name"),
-            # Violations
+
+        violations = {
             "tab_switches": data.get("tab_switches", 0),
             "inactivities": data.get("inactivities", 0),
             "text_selections": data.get("text_selections", 0),
@@ -155,67 +111,90 @@ def submit_test():
             "right_clicks": data.get("right_clicks", 0),
             "face_not_visible": data.get("face_not_visible", 0),
         }
-        
-        print(f"\nFINAL PAYLOAD:")
-        print(f"Basic info:")
-        print(f"  candidate_name: {payload['candidate_name']}")
-        print(f"  candidate_email: {payload['candidate_email']}")
-        print(f"  score: {payload['score']}")
-        print(f"Violations in payload:")
-        for field in violation_fields:
-            print(f"  {field}: {payload[field]}")
-        
-        print(f"\nAttempting Supabase insert...")
-        response = supabase.table("test_results").insert(payload).execute()
-        
-        print(f"Supabase response received")
-        print(f"Response data: {response.data}")
-        
-        if hasattr(response, 'error') and response.error:
-            print(f"Supabase error: {response.error}")
-            return jsonify({"error": f"Database error: {response.error}"}), 500
-        
-        if response.data and len(response.data) > 0:
-            saved_record = response.data[0]
-            print(f"\nSUCCESS! Record saved with ID: {saved_record.get('id')}")
-            print(f"Violations saved:")
-            for field in violation_fields:
-                saved_value = saved_record.get(field)
-                original_value = violations_received[field]
-                status = "✓" if saved_value == original_value else "✗"
-                print(f"  {field}: {original_value} -> {saved_value} {status}")
-            
-            return jsonify({
-                "status": "success",
-                "score": saved_record.get("score"),
-                "max_score": saved_record.get("max_score"), 
-                "saved_data": saved_record,
-                "violations_summary": {field: saved_record.get(field, 0) for field in violation_fields}
-            })
-        else:
-            print("ERROR: No data returned from Supabase insert")
-            return jsonify({"error": "Database insert failed - no data returned"}), 500
-            
-    except Exception as e:
-        print(f"\nEXCEPTION in submit_test:")
-        print(f"Error type: {type(e)}")
-        print(f"Error message: {str(e)}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
-        print("="*60)
-        
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
+        total_violations = sum(violations.values())
+
+        sql = """
+        INSERT INTO test_results (
+            id,
+            candidate_id,
+            candidate_name,
+            candidate_email,
+            question_set_id,
+            max_score,
+            percentage,
+            status,
+            total_questions,
+            raw_feedback,
+            evaluated_at,
+            created_at,
+            updated_at,
+            duration_used_seconds,
+            duration_used_minutes,
+            tab_switches,
+            inactivities,
+            text_selections,
+            copies,
+            pastes,
+            right_clicks,
+            face_not_visible,
+            violations
+        ) VALUES (
+            %(id)s,
+            %(candidate_id)s,
+            %(candidate_name)s,
+            %(candidate_email)s,
+            %(question_set_id)s,
+            %(max_score)s,
+            %(percentage)s,
+            %(status)s,
+            %(total_questions)s,
+            %(raw_feedback)s,
+            %(evaluated_at)s,
+            %(created_at)s,
+            %(updated_at)s,
+            %(duration_used_seconds)s,
+            %(duration_used_minutes)s,
+            %(tab_switches)s,
+            %(inactivities)s,
+            %(text_selections)s,
+            %(copies)s,
+            %(pastes)s,
+            %(right_clicks)s,
+            %(face_not_visible)s,
+            %(violations)s
+        )
+        RETURNING *;
+        """
+
+        params = {
+            "id": str(uuid.uuid4()),
+            "candidate_id": data.get("candidate_id"),
+            "candidate_name": data.get("candidate_name"),
+            "candidate_email": data.get("candidate_email"),
+            "question_set_id": data.get("question_set_id"),
+            "max_score": data.get("max_score", 0),
+            "percentage": data.get("percentage", 0.0),
+            "status": data.get("status", "Pending"),
+            "total_questions": data.get("total_questions", len(data.get("questions", []))),
+            "raw_feedback": data.get("raw_feedback", ""),
+            "evaluated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "duration_used_seconds": data.get("duration_used", 0),
+            "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
+            **violations,
+            "violations": total_violations,
+        }
+
+        # 🚨 Using Supabase PostgREST directly doesn’t allow raw SQL
+        # You’ll need a Postgres connection string OR Supabase function (rpc)
+        response = supabase.postgrest.rpc("exec_sql", {"sql": sql, "params": params}).execute()
+
+        return jsonify({"status": "success", "saved": response.data})
+    
     except Exception as e:
-        print(f"\n💥 ERROR in submit_test:")
-        print(f"Error: {str(e)}")
-        import traceback
-        print("Traceback:")
-        print(traceback.format_exc())
-        print("="*50 + "\n")
-        
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/results/<question_set_id>/<candidate_email>", methods=["GET"])
 def get_result_with_violations(question_set_id, candidate_email):
@@ -235,4 +214,3 @@ def get_result_with_violations(question_set_id, candidate_email):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
-
