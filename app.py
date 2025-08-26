@@ -119,7 +119,8 @@ def submit_test():
             "candidate_id": data.get("candidate_id"),
             "candidate_email": data.get("candidate_email"),
             "candidate_name": data.get("candidate_name"),
-            # Violations"tab_switches": data.get("tab_switches", 0),
+            # Violations
+            "tab_switches": data.get("tab_switches", 0),
             "inactivities": data.get("inactivities", 0),
             "text_selections": data.get("text_selections", 0),
             "copies": data.get("copies", 0),
