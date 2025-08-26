@@ -75,7 +75,7 @@ def register_socket_events(socketio: SocketIO):
 
             # Fetch existing result row for candidate
             res = (
-                supabase.table("results")
+                supabase.table("test_results")
                 .select("*")
                 .eq("question_set_id", question_set_id)
                 .eq("candidate_email", candidate_email)
@@ -92,7 +92,7 @@ def register_socket_events(socketio: SocketIO):
                 # Increment numeric violation columns
                 numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments.keys()}
 
-                supabase.table("results").update({
+                supabase.table("test_results").update({
                     "raw_feedback": new_feedback,
                     **numeric_updates
                 }).eq("id", row["id"]).execute()
@@ -109,7 +109,7 @@ def register_socket_events(socketio: SocketIO):
                     "raw_feedback": f"[VIOLATION] {violation_log}",
                     **{col: increments.get(col, 0) for col in increments.keys()},
                 }
-                supabase.table("results").insert(payload).execute()
+                supabase.table("test_results").insert(payload).execute()
 
             # Broadcast update
             socketio.emit("violation_update", {
