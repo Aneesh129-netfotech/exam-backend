@@ -99,6 +99,8 @@ def generate_test_route():
 def submit_test():
     try:
         data = request.get_json()
+        
+        print("Received data:", data)  # Debug log
 
         # Save exam results including violations
         payload = {
@@ -107,21 +109,23 @@ def submit_test():
             "candidate_email": data.get("candidate_email"),
             "score": data.get("score", 0),
             "duration_used_seconds": data.get("duration_used", 0),
-            # Map violations to individual columns
-            "tab_switches": data.get("violations", {}).get("tabSwitches", 0),
-            "inactivities": data.get("violations", {}).get("windowMinimizations", 0),
-            "text_selections": data.get("violations", {}).get("textSelections", 0),
-            "copies": data.get("violations", {}).get("copies", 0),
-            "pastes": data.get("violations", {}).get("pastes", 0),
-            "right_clicks": data.get("violations", {}).get("rightClicks", 0),
-            "face_not_visible": data.get("violations", {}).get("noFace", 0),
+            # Get violations directly from flat structure (not nested)
+            "tab_switches": data.get("tab_switches", 0),
+            "inactivities": data.get("inactivities", 0),
+            "text_selections": data.get("text_selections", 0),
+            "copies": data.get("copies", 0),
+            "pastes": data.get("pastes", 0),
+            "right_clicks": data.get("right_clicks", 0),
+            "face_not_visible": data.get("face_not_visible", 0),
         }
+
+        print("Payload to insert:", payload)  # Debug log
 
         response = supabase.table("results").insert(payload).execute()
         return jsonify({"status": "success", "saved_data": response.data})
     except Exception as e:
+        print("Error submitting test:", str(e))  # Debug log
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/results/<question_set_id>/<candidate_email>", methods=["GET"])
 def get_result_with_violations(question_set_id, candidate_email):
