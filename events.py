@@ -63,7 +63,7 @@ def normalize_violations(data: dict) -> dict:
             normalized[col] = int(counts.get(col, 0)) if counts.get(col) is not None else 0
         except Exception:
             normalized[col] = 0
-        return normalized
+    return normalized
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
