@@ -138,6 +138,85 @@ def submit_test():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/violations/manual", methods=["POST"])
+def insert_manual_violations():
+    """
+    Endpoint to manually insert violation data from F12 console
+    """
+    try:
+        data = request.get_json()
+        print(f"📥 Manual violation insert request: {data}")
+        
+        # Extract violation counts from the request
+        violations = {
+            "tab_switches": data.get("tab_switches", 0),
+            "inactivities": data.get("inactivities", 0), 
+            "text_selections": data.get("text_selections", 0),
+            "copies": data.get("copies", 0),
+            "pastes": data.get("pastes", 0),
+            "right_clicks": data.get("right_clicks", 0),
+            "face_not_visible": data.get("face_not_visible", 0),
+        }
+        
+        # Calculate total violations
+        total_violations = sum(violations.values())
+        
+        # Prepare the record
+        params = {
+            "id": str(uuid.uuid4()),
+            "question_set_id": data.get("question_set_id", f"manual-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"),
+            "candidate_email": data.get("candidate_email", "manual@example.com"),
+            "candidate_name": data.get("candidate_name", "Manual Entry"),
+            "score": data.get("score", 0),
+            "max_score": data.get("max_score", 0),
+            "percentage": data.get("percentage", 0.0),
+            "status": data.get("status", "Manual Entry"),
+            "total_questions": data.get("total_questions", 0),
+            "raw_feedback": data.get("raw_feedback", f"Manual violation entry: {', '.join([f'{k}={v}' for k,v in violations.items() if v > 0])}"),
+            "evaluated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "duration_used_seconds": data.get("duration_used_seconds", 0),
+            "duration_used_minutes": data.get("duration_used_minutes", 0),
+            "candidate_id": data.get("candidate_id"),
+            **violations,  # Add all violation columns
+            "violations": total_violations,
+        }
+        
+        print(f"📝 Inserting manual violation record: {params}")
+        
+        # Insert into Supabase
+        response = supabase.table("test_results").insert(params).execute()
+        
+        if response.data:
+            print(f"✅ Manual violation record created successfully: {response.data[0]['id']}")
+            return jsonify({
+                "status": "success",
+                "message": "Manual violation record created successfully",
+                "data": response.data[0],
+                "violations_summary": violations,
+                "total_violations": total_violations
+            })
+        else:
+            return jsonify({"error": "Failed to create record"}), 500
+            
+    except Exception as e:
+        print(f"❌ Manual violation insert failed: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+# Add this endpoint for testing the connection
+@app.route("/api/violations/test", methods=["GET"])
+def test_violations_endpoint():
+    """
+    Test endpoint to verify the violations API is working
+    """
+    return jsonify({
+        "status": "success",
+        "message": "Violations API is working",
+        "timestamp": datetime.utcnow().isoformat(),
+        "valid_columns": list(VALID_COLUMNS)
+    })
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
