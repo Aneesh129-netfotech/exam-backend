@@ -38,32 +38,9 @@ LEGACY_MAP = {
 
 
 def normalize_violations(data: dict) -> dict:
-    counts = data.get("violations") or data.get("counts")
+    # Return only individual violation counts, ignore totals
+    return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
-    # If violations is just an int (total), ignore it
-    if isinstance(counts, int):
-        counts = None
-
-    if not counts:
-        # Try flat keys
-        counts = {col: data.get(col, 0) for col in VALID_COLUMNS}
-
-    # Legacy single-event format
-    if not any(counts.values()):
-        vt = data.get("violation_type")
-        if vt:
-            col = LEGACY_MAP.get(vt)
-            if col:
-                counts = {col: 1}
-
-    # ✅ Ensure all keys in VALID_COLUMNS are present
-    normalized = {}
-    for col in VALID_COLUMNS:
-        try:
-            normalized[col] = int(counts.get(col, 0)) if counts.get(col) is not None else 0
-        except Exception:
-            normalized[col] = 0
-    return normalized
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
@@ -99,7 +76,7 @@ def register_socket_events(socketio: SocketIO):
             )
 
             if res.data:
-                # 🔄 Update existing row
+                # Update existing row
                 row = res.data[0]
 
                 prev_feedback = row.get("raw_feedback", "") or ""
@@ -111,19 +88,16 @@ def register_socket_events(socketio: SocketIO):
                     for col in increments.keys()
                 }
 
-                new_total_violations = row.get("violations", 0) + sum(increments.values())
-
                 supabase.table("test_results").update({
                     "raw_feedback": new_feedback,
                     **numeric_updates,
-                    "violations": new_total_violations,
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("id", row["id"]).execute()
 
-                payload = {**row, "raw_feedback": new_feedback, **numeric_updates, "violations": new_total_violations}
+                payload = {**row, "raw_feedback": new_feedback, **numeric_updates}
 
             else:
-                # 🆕 Fresh row
+                # Insert new row
                 violation_log = "\n".join([f"{col}: {inc}" for col, inc in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
@@ -140,7 +114,6 @@ def register_socket_events(socketio: SocketIO):
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
                     **{col: increments.get(col, 0) for col in VALID_COLUMNS},
-                    "violations": sum(increments.values())
                 }
                 supabase.table("test_results").insert(payload).execute()
 
@@ -149,7 +122,6 @@ def register_socket_events(socketio: SocketIO):
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
                 **{col: payload.get(col, 0) for col in VALID_COLUMNS},
-                "violations": payload.get("violations", 0)
             })
 
             print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
