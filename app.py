@@ -234,4 +234,5 @@ def get_result_with_violations(question_set_id, candidate_email):
 
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False)
+    socketio.run(app, host="0.0.0.0", port=5001, debug=False)
+
