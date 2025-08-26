@@ -6,6 +6,8 @@ import os
 import logging
 import asyncio
 from supabase import create_client
+from datetime import datetime
+import uuid
 
 from events import register_socket_events
 from test_generator import generate_questions, TestRequest
@@ -100,20 +102,24 @@ def submit_test():
     try:
         data = request.get_json()
         print("Received data:", data)  # Debug log
+        now = datetime.utcnow().isoformat()
         payload = {
-            "question_set_id": data.get("question_set_id"),
+            "id": str(uuid.uuid4()),  # required UUID"question_set_id": data.get("question_set_id"),
             "score": data.get("score", 0),
             "max_score": data.get("max_score", 0),
             "percentage": data.get("percentage", 0.0),
             "status": data.get("status", "Pending"),
             "total_questions": data.get("total_questions", len(data.get("questions", []))),
             "raw_feedback": data.get("raw_feedback", ""),
-            "evaluated_at": data.get("evaluated_at"),  # frontend should send datetime"duration_used_seconds": data.get("duration_used", 0),
+            "evaluated_at": data.get("evaluated_at", now),
+            "created_at": now,
+            "updated_at": now,
+            "duration_used_seconds": data.get("duration_used", 0),
             "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
             "candidate_id": data.get("candidate_id"),
             "candidate_email": data.get("candidate_email"),
             "candidate_name": data.get("candidate_name"),
-            # ✅ Violations"tab_switches": data.get("tab_switches", 0),
+            # Violations"tab_switches": data.get("tab_switches", 0),
             "inactivities": data.get("inactivities", 0),
             "text_selections": data.get("text_selections", 0),
             "copies": data.get("copies", 0),
@@ -124,7 +130,7 @@ def submit_test():
 
         print("Payload to insert:", payload)
 
-        response = supabase.table("results").insert(payload).execute()
+        response = supabase.table("test_results").insert(payload).execute()
         print("Supabase response:", response)
 
         return jsonify({"status": "success", "saved_data": response.data})
