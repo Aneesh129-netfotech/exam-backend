@@ -38,14 +38,6 @@ LEGACY_MAP = {
 
 
 def normalize_violations(data: dict) -> dict:
-    """
-    Normalize incoming violation data into {column: int}.
-    Supports:
-      - { "violations": {...} }
-      - { "counts": {...} }
-      - flat columns (tab_switches=7, etc.)
-      - legacy { "violation_type": "tab_switch" }
-    """
     counts = data.get("violations") or data.get("counts")
 
     # If violations is just an int (total), ignore it
@@ -64,11 +56,14 @@ def normalize_violations(data: dict) -> dict:
             if col:
                 counts = {col: 1}
 
-    increments = {
-        k: int(v) for k, v in counts.items()
-        if k in VALID_COLUMNS and v is not None and int(v) > 0
-    }
-    return increments
+    # ✅ Ensure all keys in VALID_COLUMNS are present
+    normalized = {}
+    for col in VALID_COLUMNS:
+        try:
+            normalized[col] = int(counts.get(col, 0)) if counts.get(col) is not None else 0
+        except Exception:
+            normalized[col] = 0
+        return normalized
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
