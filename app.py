@@ -121,6 +121,7 @@ def submit_test():
             .select("*") \
             .eq("question_set_id", question_set_id) \
             .eq("candidate_email", candidate_email) \
+            .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
 
@@ -154,6 +155,7 @@ def submit_test():
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
             payload = {
                 "id": str(uuid.uuid4()),
+                "exam_id": data.get("exam_id"),
                 "question_set_id": question_set_id,
                 "candidate_name": data.get("candidate_name"),
                 "candidate_email": candidate_email,
@@ -171,7 +173,7 @@ def submit_test():
                 "candidate_id": data.get("candidate_id"),
                 **non_zero_violations
             }
-            supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
+            supabase.table("test_results").insert(payload).execute()
 
         # Optionally emit an update to frontend
         socketio.emit("violation_update", {
@@ -224,8 +226,8 @@ def insert_manual_violations():
         print(f"📝 Inserting manual violation record: {params}")
         
         # Insert into Supabase
-        response = supabase.table("test_results").insert(params).execute()
-        
+        response = supabase.table("test_results").upsert(params, on_conflict=["candidate_email", "question_set_id"]).execute()
+
         if response.data:
             print(f"✅ Manual violation record created successfully: {response.data[0]['id']}")
             return jsonify({
