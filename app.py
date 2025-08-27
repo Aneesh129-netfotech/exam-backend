@@ -171,7 +171,7 @@ def submit_test():
                 "candidate_id": data.get("candidate_id"),
                 **non_zero_violations
             }
-            supabase.table("test_results").insert(payload).execute()
+            supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
 
         # Optionally emit an update to frontend
         socketio.emit("violation_update", {
