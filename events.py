@@ -55,50 +55,47 @@ def register_socket_events(socketio: SocketIO):
     def handle_suspicious_event(data):
         try:
             question_set_id = data.get("question_set_id")
-            candidate_name = data.get("candidate_name")
             candidate_email = data.get("candidate_email")
+            candidate_name = data.get("candidate_name", "Unknown")
 
             if not question_set_id or not candidate_email:
-                print("⚠️ missing question_set_id or candidate_email")
+                print("⚠️ Missing question_set_id or candidate_email")
                 return
 
-            increments = normalize_violations(data)
+            # Only valid columns
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
             if not increments:
-                return
+                return  # nothing to update
 
-            res = (
-                supabase.table("test_results")
-                .select("*")
-                .eq("question_set_id", question_set_id)
-                .eq("candidate_email", candidate_email)
-                .limit(1)
+            # Find existing row
+            res = supabase.table("test_results") \
+                .select("*") \
+                .eq("question_set_id", question_set_id) \
+                .eq("candidate_email", candidate_email) \
+                .limit(1) \
                 .execute()
-            )
 
             if res.data:
                 # Update existing row
                 row = res.data[0]
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
 
-                prev_feedback = row.get("raw_feedback", "") or ""
-                violation_log = "\n".join([f"{col}: +{inc}" for col, inc in increments.items()])
-                new_feedback = prev_feedback + f"\n[VIOLATION] {violation_log}"
-
-                numeric_updates = {
-                    col: row.get(col, 0) + increments.get(col, 0)
-                    for col in increments.keys()
-                }
+                # Append feedback
+                violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
+                new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
 
                 supabase.table("test_results").update({
-                    "raw_feedback": new_feedback,
                     **numeric_updates,
+                    "raw_feedback": new_feedback,
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("id", row["id"]).execute()
 
-                payload = {**row, "raw_feedback": new_feedback, **numeric_updates}
+                payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
 
             else:
-                # Insert new row
-                violation_log = "\n".join([f"{col}: {inc}" for col, inc in increments.items()])
+                # Create new row
+                violation_log = ", ".join([f"{k}: {v}" for k, v in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
                     "question_set_id": question_set_id,
@@ -113,11 +110,11 @@ def register_socket_events(socketio: SocketIO):
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
-                    **{col: increments.get(col, 0) for col in VALID_COLUMNS},
+                    **increments
                 }
                 supabase.table("test_results").insert(payload).execute()
 
-            # Broadcast update
+            # Always broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
