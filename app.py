@@ -121,7 +121,6 @@ def submit_test():
             .select("*") \
             .eq("question_set_id", question_set_id) \
             .eq("candidate_id", candidate_id) \
-            .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
 
@@ -244,7 +243,7 @@ def insert_manual_violations():
         # Insert into Supabase
         response = supabase.table("test_results").upsert(
             params,
-            on_conflict=["candidate_id", "question_set_id", "exam_id"]
+            on_conflict=["candidate_id", "question_set_id"]
         ).execute()
 
         if response.data:
