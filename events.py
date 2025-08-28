@@ -114,7 +114,7 @@ def register_socket_events(socketio: SocketIO):
                 }
                 supabase.table("test_results").upsert(
                     payload,
-                    on_conflict=["candidate_id", "question_set_id", "exam_id"]
+                    on_conflict=["candidate_id", "question_set_id"]
                 ).execute()
 
             # Always broadcast update
