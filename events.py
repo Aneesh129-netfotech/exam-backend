@@ -150,9 +150,10 @@ def register_socket_events(socketio: SocketIO):
                 print("⚠️ Missing both candidate_email and candidate_id")
                 return
 
-            # Only valid columns
-            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
-            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
+            # Extract incoming violations safely
+            violations = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in violations.items() if v > 0}
+
             if not increments:
                 print("⚠️ No valid violations to process")
                 return  # nothing to update
@@ -162,23 +163,22 @@ def register_socket_events(socketio: SocketIO):
                 question_set_id, candidate_id, candidate_email, candidate_name
             )
 
-            # Merge violations (add to existing counts)
+            # Merge violations: add new counts to existing DB values
             merged_violations = {
-                col: existing_record.get(col, 0) + increments.get(col, 0) 
+                col: existing_record.get(col, 0) + violations.get(col, 0)
                 for col in VALID_COLUMNS
             }
 
-            non_zero_violations = {k: v for k, v in merged_violations.items() if isinstance(v, int) and v > 0}
-            # Append feedback
-            if non_zero_violations:
-                feedback = "Final violation summary: " + ", ".join([f"{k}={v}" for k, v in merged_violations.items()])
-            else:
-                feedback = "No violations detected"
+            # Build feedback log
+            feedback = existing_record.get("raw_feedback", "")
+            if increments:
+                increment_summary = ", ".join([f"{k}:+{v}" for k, v in increments.items()])
+                feedback += f"\n[VIOLATION] {increment_summary}"
 
             # Update the existing record
             update_data = {
                 **merged_violations,
-                # "raw_feedback": new_feedback,
+                "raw_feedback": feedback,
                 "updated_at": datetime.utcnow().isoformat()
             }
 
@@ -187,7 +187,7 @@ def register_socket_events(socketio: SocketIO):
             # Prepare payload for broadcast
             payload = {**existing_record, **update_data}
 
-            # Always broadcast update
+            # Broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "candidate_id": candidate_id,
