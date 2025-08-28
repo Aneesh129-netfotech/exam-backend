@@ -112,7 +112,10 @@ def register_socket_events(socketio: SocketIO):
                     "evaluated_at": datetime.utcnow().isoformat(),
                     **increments
                 }
-                supabase.table("test_results").upsert(payload, on_conflict=["candidate_id", "question_set_id"]).execute()
+                supabase.table("test_results").upsert(
+                    payload,
+                    on_conflict=["candidate_id", "question_set_id", "exam_id"]
+                ).execute()
 
             # Always broadcast update
             socketio.emit("violation_update", {
