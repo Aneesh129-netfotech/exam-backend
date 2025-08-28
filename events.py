@@ -1,4 +1,4 @@
-# events.py - Unified version with atomic violation handling
+# events.py - Fixed version to ensure single row per candidate/question_set
 from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
@@ -12,7 +12,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Supabase credentials not found!")
+    raise ValueError("Supabase credentials not found! Make sure .env has SUPABASE_URL and SUPABASE_KEY.")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -26,23 +26,59 @@ VALID_COLUMNS = {
     "face_not_visible",
 }
 
-def merge_violations(existing_record: dict, new_violations: dict) -> dict:
-    merged = {}
-    for col in VALID_COLUMNS:
-        merged[col] = int(existing_record.get(col, 0)) + int(new_violations.get(col, 0))
-    return merged
+LEGACY_MAP = {
+    "tab_switch": "tab_switches",
+    "inactivity": "inactivities",
+    "text_selection": "text_selections",
+    "copy": "copies",
+    "paste": "pastes",
+    "right_click": "right_clicks",
+    "face_not_visible": "face_not_visible",
+}
+
+
+def normalize_violations(data: dict) -> dict:
+    # Return only individual violation counts, ignore totals
+    return {col: data.get(col, 0) for col in VALID_COLUMNS}
+
 
 def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
+    """
+    Helper function to find existing test result or create a new one.
+    Ensures only one row exists per candidate/question_set combination.
+    """
+    # First, try to find existing record with both candidate_id AND candidate_email for safety
     res = supabase.table("test_results") \
         .select("*") \
         .eq("question_set_id", question_set_id) \
         .eq("candidate_id", candidate_id) \
-        .limit(1).execute()
-
+        .limit(1) \
+        .execute()
+    
     if res.data:
         return res.data[0]
-
-    # Upsert to avoid race conditions
+    
+    # Also check by email if candidate_id lookup failed
+    if candidate_email:
+        res_email = supabase.table("test_results") \
+            .select("*") \
+            .eq("question_set_id", question_set_id) \
+            .eq("candidate_email", candidate_email) \
+            .limit(1) \
+            .execute()
+        
+        if res_email.data:
+            # Update the candidate_id if it was missing
+            existing_record = res_email.data[0]
+            if not existing_record.get("candidate_id") and candidate_id:
+                supabase.table("test_results").update({
+                    "candidate_id": candidate_id,
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("id", existing_record["id"]).execute()
+                existing_record["candidate_id"] = candidate_id
+            return existing_record
+    
+    # If no record found, create a new one
     new_record = {
         "id": str(uuid.uuid4()),
         "question_set_id": question_set_id,
@@ -60,12 +96,34 @@ def find_or_create_test_result(question_set_id, candidate_id, candidate_email, c
         "updated_at": datetime.utcnow().isoformat(),
         "duration_used_seconds": 0,
         "duration_used_minutes": 0,
-        **{col: 0 for col in VALID_COLUMNS}
+        # Initialize all violation columns to 0
+        "tab_switches": 0,
+        "inactivities": 0,
+        "text_selections": 0,
+        "copies": 0,
+        "pastes": 0,
+        "right_clicks": 0,
+        "face_not_visible": 0,
     }
+    
+    try:
+        # Insert the new record
+        insert_res = supabase.table("test_results").upsert(new_record, on_conflict=["question_set_id", "candidate_id"]).execute()
+        return insert_res.data[0] if insert_res.data else new_record
+    except Exception as e:
+        print(f"⚠️ Error creating new record, attempting to find existing: {e}")
+        # If insert fails due to conflict, try to find the record again
+        res_retry = supabase.table("test_results") \
+            .select("*") \
+            .eq("question_set_id", question_set_id) \
+            .eq("candidate_id", candidate_id) \
+            .limit(1) \
+            .execute()
+        
+        if res_retry.data:
+            return res_retry.data[0]
+        raise e
 
-    insert_res = supabase.table("test_results") \
-        .upsert(new_record, on_conflict=["question_set_id", "candidate_id"]).execute()
-    return insert_res.data[0] if insert_res.data else new_record
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
@@ -84,31 +142,52 @@ def register_socket_events(socketio: SocketIO):
             candidate_id = data.get("candidate_id")
             candidate_name = data.get("candidate_name", "Unknown")
 
-            if not question_set_id or (not candidate_email and not candidate_id):
-                print("⚠️ Missing identifiers")
+            if not question_set_id:
+                print("⚠️ Missing question_set_id")
+                return
+            
+            if not candidate_email and not candidate_id:
+                print("⚠️ Missing both candidate_email and candidate_id")
                 return
 
-            violations = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
-            increments = {k: v for k, v in violations.items() if v > 0}
+            # Only valid columns
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
             if not increments:
-                return
+                print("⚠️ No valid violations to process")
+                return  # nothing to update
 
+            # Find or create the test result record
             existing_record = find_or_create_test_result(
                 question_set_id, candidate_id, candidate_email, candidate_name
             )
 
-            merged_violations = merge_violations(existing_record, violations)
-            increment_summary = ", ".join([f"{k}:+{v}" for k, v in increments.items()])
-            feedback = (existing_record.get("raw_feedback") or "") + f"\n[VIOLATION] {increment_summary}"
+            # Merge violations (add to existing counts)
+            merged_violations = {
+                col: existing_record.get(col, 0) + increments.get(col, 0) 
+                for col in VALID_COLUMNS
+            }
 
+            non_zero_violations = {k: v for k, v in merged_violations.items() if isinstance(v, int) and v > 0}
+            # Append feedback
+            if non_zero_violations:
+                feedback = "Final violation summary: " + ", ".join([f"{k}={v}" for k, v in merged_violations.items()])
+            else:
+                feedback = "No violations detected"
+
+            # Update the existing record
             update_data = {
                 **merged_violations,
-                "raw_feedback": feedback,
+                # "raw_feedback": new_feedback,
                 "updated_at": datetime.utcnow().isoformat()
             }
+
             supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
 
+            # Prepare payload for broadcast
             payload = {**existing_record, **update_data}
+
+            # Always broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "candidate_id": candidate_id,
@@ -116,7 +195,7 @@ def register_socket_events(socketio: SocketIO):
                 **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
-            print(f"✅ Violation batch saved for {candidate_email or candidate_id}: {increments}")
+            print(f"✅ Violation batch saved for {candidate_email or candidate_id} in set {question_set_id}: {increments}")
 
         except Exception as e:
             print(f"❌ Failed to process suspicious event: {e}")
