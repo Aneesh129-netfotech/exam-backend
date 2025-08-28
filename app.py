@@ -107,10 +107,10 @@ def submit_test():
     try:
         data = request.get_json()
         question_set_id = data.get("question_set_id")
-        candidate_email = data.get("candidate_email")
+        candidate_id = data.get("candidate_id")
 
-        if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
+        if not question_set_id or not candidate_id:
+            return jsonify({"error": "Missing question_set_id or candidate_id"}), 400
 
         # Only non-zero violation columns
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
@@ -120,7 +120,7 @@ def submit_test():
         res = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
-            .eq("candidate_email", candidate_email) \
+            .eq("candidate_id", candidate_id) \
             .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
@@ -186,7 +186,7 @@ def submit_test():
 
         # Optionally emit an update to frontend
         socketio.emit("violation_update", {
-            "candidate_email": candidate_email,
+            "candidate_id": candidate_id,
             "question_set_id": question_set_id,
             **{col: payload.get(col, 0) for col in VALID_COLUMNS},
         })
@@ -229,7 +229,14 @@ def insert_manual_violations():
             "duration_used_seconds": data.get("duration_used_seconds", 0),
             "duration_used_minutes": data.get("duration_used_minutes", 0),
             "candidate_id": data.get("candidate_id"),
-            **violations,  # individual columns only
+            # include ALL violations, even zeros
+            "tab_switches": data.get("tab_switches", 0),
+            "inactivities": data.get("inactivities", 0),
+            "text_selections": data.get("text_selections", 0),
+            "copies": data.get("copies", 0),
+            "pastes": data.get("pastes", 0),
+            "right_clicks": data.get("right_clicks", 0),
+            "face_not_visible": data.get("face_not_visible", 0),
         }
         
         print(f"📝 Inserting manual violation record: {params}")
