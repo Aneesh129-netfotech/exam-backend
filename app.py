@@ -1,4 +1,4 @@
-# app.py - Fixed version to ensure single row per candidate/question_set
+# app.py - Unified version with atomic violation handling
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -10,7 +10,7 @@ from supabase import create_client
 from datetime import datetime
 import uuid
 
-from events import register_socket_events, VALID_COLUMNS, find_or_create_test_result
+from events import register_socket_events, VALID_COLUMNS, find_or_create_test_result, merge_violations
 from test_generator import generate_questions, TestRequest
 
 load_dotenv()
@@ -27,10 +27,8 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "defaultsecret")
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
-# Use eventlet for proper websocket support
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 register_socket_events(socketio)
-
 
 @app.route("/")
 def index():
@@ -99,55 +97,6 @@ def generate_test_route():
         return jsonify({"error": str(e)}), 500
 
 
-def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    """
-    Helper function to find existing test result or create a new one.
-    Ensures only one row exists per candidate/question_set combination.
-    """
-    # First, try to find existing record
-    res = supabase.table("test_results") \
-        .select("*") \
-        .eq("question_set_id", question_set_id) \
-        .eq("candidate_id", candidate_id) \
-        .limit(1) \
-        .execute()
-    
-    if res.data:
-        return res.data[0]
-    
-    # If no record found, create a new one
-    new_record = {
-        "id": str(uuid.uuid4()),
-        "question_set_id": question_set_id,
-        "candidate_id": candidate_id,
-        "candidate_email": candidate_email,
-        "candidate_name": candidate_name,
-        "score": 0,
-        "max_score": 0,
-        "percentage": 0.0,
-        "status": "Pending",
-        "total_questions": 0,
-        "raw_feedback": "",
-        "evaluated_at": datetime.utcnow().isoformat(),
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "duration_used_seconds": 0,
-        "duration_used_minutes": 0,
-        # Initialize all violation columns to 0
-        "tab_switches": 0,
-        "inactivities": 0,
-        "text_selections": 0,
-        "copies": 0,
-        "pastes": 0,
-        "right_clicks": 0,
-        "face_not_visible": 0,
-    }
-    
-    # Insert the new record
-    insert_res = supabase.table("test_results").insert(new_record).execute()
-    return insert_res.data[0] if insert_res.data else new_record
-
-
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     try:
@@ -160,26 +109,20 @@ def submit_test():
         if not question_set_id or not candidate_id:
             return jsonify({"error": "Missing question_set_id or candidate_id"}), 400
 
-        # Find or create the test result record
+        # Find or create test result record
         existing_record = find_or_create_test_result(
             question_set_id, candidate_id, candidate_email, candidate_name
         )
 
-        # Build violations dict safely
+        # Extract violations
         violations = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
-        non_zero_violations = {k: v for k, v in violations.items() if v > 0}
+        merged_violations = merge_violations(existing_record, violations)
 
-        # Merge with existing counts
-        merged_violations = {
-            col: existing_record.get(col, 0) + violations.get(col, 0)
-            for col in VALID_COLUMNS
-        }
-
-        # Append feedback only if there are violations
-        violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
-        feedback = (existing_record.get("raw_feedback") or "") + (
-            f"\n[VIOLATION] {violation_log}" if violation_log else ""
-        )
+        # Build feedback
+        violation_summary = ", ".join([f"{k}:+{v}" for k, v in violations.items() if v > 0])
+        feedback = (existing_record.get("raw_feedback") or "")
+        if violation_summary:
+            feedback += f"\n[VIOLATION] {violation_summary}"
 
         # Prepare update
         update_data = {
@@ -195,10 +138,8 @@ def submit_test():
             **merged_violations
         }
 
-        # Update DB
         supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
 
-        # Emit websocket event
         socketio.emit("violation_update", {
             "candidate_id": candidate_id,
             "question_set_id": question_set_id,
@@ -211,40 +152,28 @@ def submit_test():
         print(f"❌ Error in submit_test: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
-    """
-    Endpoint to manually insert violation data from F12 console
-    """
     try:
         data = request.get_json()
-        print(f"📥 Manual violation insert request: {data}")
-        
         question_set_id = data.get("question_set_id", f"manual-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}")
         candidate_id = data.get("candidate_id", f"manual-{str(uuid.uuid4())[:8]}")
         candidate_email = data.get("candidate_email", "manual@example.com")
         candidate_name = data.get("candidate_name", "Manual Entry")
-        
-        # Find or create the test result record
+
         existing_record = find_or_create_test_result(
             question_set_id, candidate_id, candidate_email, candidate_name
         )
-        
-        # Extract individual violation counts
-        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
-        
-        # Merge with existing violations
-        merged_violations = {
-            col: violations.get(col, 0) 
-            for col in VALID_COLUMNS
-        }
-        
-        # Prepare update data
-        violation_summary = ', '.join([f'{k}={v}' for k, v in violations.items() if v > 0])
-        feedback = (existing_record.get("raw_feedback") or "") + (
-            f"\nManual violation entry: {violation_summary}" if violation_summary else ""
-        )
-        
+
+        violations = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
+        merged_violations = merge_violations(existing_record, violations)
+
+        violation_summary = ', '.join([f'{k}:+{v}' for k, v in violations.items() if v > 0])
+        feedback = (existing_record.get("raw_feedback") or "")
+        if violation_summary:
+            feedback += f"\nManual violation entry: {violation_summary}"
+
         update_data = {
             "score": data.get("score", existing_record.get("score", 0)),
             "max_score": data.get("max_score", existing_record.get("max_score", 0)),
@@ -257,12 +186,10 @@ def insert_manual_violations():
             "duration_used_minutes": data.get("duration_used_minutes", existing_record.get("duration_used_minutes", 0)),
             **merged_violations
         }
-        
-        # Update the record
+
         response = supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
 
         if response.data:
-            print(f"✅ Manual violation record updated successfully: {existing_record['id']}")
             return jsonify({
                 "status": "success",
                 "message": "Manual violation record updated successfully",
@@ -271,7 +198,7 @@ def insert_manual_violations():
             })
         else:
             return jsonify({"error": "Failed to update record"}), 500
-            
+
     except Exception as e:
         print(f"❌ Manual violation insert failed: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -279,9 +206,6 @@ def insert_manual_violations():
 
 @app.route("/api/violations/test", methods=["GET"])
 def test_violations_endpoint():
-    """
-    Test endpoint to verify the violations API is working
-    """
     return jsonify({
         "status": "success",
         "message": "Violations API is working",
