@@ -244,7 +244,7 @@ def insert_manual_violations():
         # Insert into Supabase
         response = supabase.table("test_results").upsert(
             params,
-            on_conflict=["candidate_id", "question_set_id"]
+            on_conflict=["candidate_id", "question_set_id", "exam_id"]
         ).execute()
 
         if response.data:
