@@ -10,7 +10,7 @@ from supabase import create_client
 from datetime import datetime
 import uuid
 
-from events import register_socket_events, VALID_COLUMNS
+from events import register_socket_events, VALID_COLUMNS, find_or_create_test_result
 from test_generator import generate_questions, TestRequest
 
 load_dotenv()
@@ -302,3 +302,4 @@ def test_violations_endpoint():
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
+
