@@ -150,9 +150,6 @@ def find_or_create_test_result(question_set_id, candidate_id, candidate_email, c
 
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
-    """
-    Upsert candidate test results + violations into a single row.
-    """
     try:
         data = request.get_json()
         question_set_id = data.get("question_set_id")
@@ -168,58 +165,51 @@ def submit_test():
             question_set_id, candidate_id, candidate_email, candidate_name
         )
 
-        # Only non-zero violation columns
-        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+        # Build violations dict safely
+        violations = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
-        # Merge violations (add to existing counts)
+        # Merge with existing counts
         merged_violations = {
-            col: existing_record.get(col, 0) + violations.get(col, 0) 
+            col: existing_record.get(col, 0) + violations.get(col, 0)
             for col in VALID_COLUMNS
         }
 
-        # Append feedback for violations only
+        # Append feedback only if there are violations
         violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
-        new_feedback = (existing_record.get("raw_feedback") or "") + (
+        feedback = (existing_record.get("raw_feedback") or "") + (
             f"\n[VIOLATION] {violation_log}" if violation_log else ""
         )
 
-        # Update the existing record
+        # Prepare update
         update_data = {
             "score": data.get("score", existing_record.get("score", 0)),
             "max_score": data.get("max_score", existing_record.get("max_score", 0)),
             "percentage": data.get("percentage", existing_record.get("percentage", 0.0)),
             "total_questions": data.get("total_questions", existing_record.get("total_questions", 0)),
             "status": data.get("status", existing_record.get("status", "Pending")),
-            "raw_feedback": new_feedback,
+            "raw_feedback": feedback,
             "updated_at": datetime.utcnow().isoformat(),
             "duration_used_seconds": data.get("duration_used", existing_record.get("duration_used_seconds", 0)),
             "duration_used_minutes": round(data.get("duration_used", existing_record.get("duration_used_seconds", 0)) / 60, 2),
             **merged_violations
         }
 
-        # Update the record
+        # Update DB
         supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
-        
-        # Prepare response payload
-        payload = {**existing_record, **update_data}
 
-        # Emit update to frontend
+        # Emit websocket event
         socketio.emit("violation_update", {
             "candidate_id": candidate_id,
             "question_set_id": question_set_id,
-            **{col: payload.get(col, 0) for col in VALID_COLUMNS},
+            **{col: update_data.get(col, 0) for col in VALID_COLUMNS},
         })
 
-        return jsonify({
-            "status": "success",
-            "saved": payload
-        })
+        return jsonify({"status": "success", "saved": {**existing_record, **update_data}})
 
     except Exception as e:
         print(f"❌ Error in submit_test: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
@@ -251,7 +241,7 @@ def insert_manual_violations():
         
         # Prepare update data
         violation_summary = ', '.join([f'{k}={v}' for k, v in violations.items() if v > 0])
-        new_feedback = (existing_record.get("raw_feedback") or "") + (
+        feedback = (existing_record.get("raw_feedback") or "") + (
             f"\nManual violation entry: {violation_summary}" if violation_summary else ""
         )
         
@@ -261,7 +251,7 @@ def insert_manual_violations():
             "percentage": data.get("percentage", existing_record.get("percentage", 0.0)),
             "status": data.get("status", existing_record.get("status", "Manual Entry")),
             "total_questions": data.get("total_questions", existing_record.get("total_questions", 0)),
-            "raw_feedback": new_feedback,
+            "raw_feedback": feedback,
             "updated_at": datetime.utcnow().isoformat(),
             "duration_used_seconds": data.get("duration_used_seconds", existing_record.get("duration_used_seconds", 0)),
             "duration_used_minutes": data.get("duration_used_minutes", existing_record.get("duration_used_minutes", 0)),
@@ -302,4 +292,3 @@ def test_violations_endpoint():
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
-
