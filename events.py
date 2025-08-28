@@ -59,7 +59,7 @@ def register_socket_events(socketio: SocketIO):
             candidate_name = data.get("candidate_name", "Unknown")
 
             if not question_set_id or not candidate_email:
-                print("⚠️ Missing question_set_id or candidate_email")
+                print("⚠️ Missing question_set_id or candidate_id")
                 return
 
             # Only valid columns
@@ -72,7 +72,7 @@ def register_socket_events(socketio: SocketIO):
             res = supabase.table("test_results") \
                 .select("*") \
                 .eq("question_set_id", question_set_id) \
-                .eq("candidate_email", candidate_email) \
+                .eq("candidate_id", data.get("candidate_id")) \
                 .limit(1) \
                 .execute()
 
@@ -112,7 +112,7 @@ def register_socket_events(socketio: SocketIO):
                     "evaluated_at": datetime.utcnow().isoformat(),
                     **increments
                 }
-                supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
+                supabase.table("test_results").upsert(payload, on_conflict=["candidate_id", "question_set_id"]).execute()
 
             # Always broadcast update
             socketio.emit("violation_update", {
