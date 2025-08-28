@@ -168,14 +168,17 @@ def register_socket_events(socketio: SocketIO):
                 for col in VALID_COLUMNS
             }
 
+            non_zero_violations = {k: v for k, v in merged_violations.items() if isinstance(v, int) and v > 0}
             # Append feedback
-            violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
-            new_feedback = (existing_record.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
+            if non_zero_violations:
+                feedback = "Final violation summary: " + ", ".join([f"{k}={v}" for k, v in merged_violations.items()])
+            else:
+                feedback = "No violations detected"
 
             # Update the existing record
             update_data = {
                 **merged_violations,
-                "raw_feedback": new_feedback,
+                # "raw_feedback": new_feedback,
                 "updated_at": datetime.utcnow().isoformat()
             }
 
