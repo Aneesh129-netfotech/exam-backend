@@ -171,7 +171,7 @@ def submit_test():
                 "duration_used_seconds": data.get("duration_used", 0),
                 "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
                 "candidate_id": data.get("candidate_id"),
-                **non_zero_violations
+                **violations
             }
             supabase.table("test_results").insert(payload).execute()
 
