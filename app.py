@@ -235,7 +235,7 @@ def insert_manual_violations():
         
         # Merge with existing violations
         merged_violations = {
-            col: existing_record.get(col, 0) + violations.get(col, 0) 
+            col: violations.get(col, 0) 
             for col in VALID_COLUMNS
         }
         
