@@ -98,56 +98,6 @@ def generate_test_route():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    """
-    Helper function to find existing test result or create a new one.
-    Ensures only one row exists per candidate/question_set combination.
-    """
-    # First, try to find existing record
-    res = supabase.table("test_results") \
-        .select("*") \
-        .eq("question_set_id", question_set_id) \
-        .eq("candidate_id", candidate_id) \
-        .limit(1) \
-        .execute()
-    
-    if res.data:
-        return res.data[0]
-    
-    # If no record found, create a new one
-    new_record = {
-        "id": str(uuid.uuid4()),
-        "question_set_id": question_set_id,
-        "candidate_id": candidate_id,
-        "candidate_email": candidate_email,
-        "candidate_name": candidate_name,
-        "score": 0,
-        "max_score": 0,
-        "percentage": 0.0,
-        "status": "Pending",
-        "total_questions": 0,
-        "raw_feedback": "",
-        "evaluated_at": datetime.utcnow().isoformat(),
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "duration_used_seconds": 0,
-        "duration_used_minutes": 0,
-        # Initialize all violation columns to 0
-        "tab_switches": 0,
-        "inactivities": 0,
-        "text_selections": 0,
-        "copies": 0,
-        "pastes": 0,
-        "right_clicks": 0,
-        "face_not_visible": 0,
-    }
-    
-    # Insert the new record
-    insert_res = supabase.table("test_results").insert(new_record).execute()
-    return insert_res.data[0] if insert_res.data else new_record
-
-
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
