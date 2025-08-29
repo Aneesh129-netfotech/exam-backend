@@ -43,76 +43,57 @@ def normalize_violations(data: dict) -> dict:
 
 
 def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    """
-    Helper function to find existing test result or create a new one.
-    Ensures only one row exists per candidate/question_set combination.
-    """
-    # First, try to find existing record with both candidate_id AND candidate_email for safety
-    res = supabase.table("test_results") \
-        .select("*") \
-        .eq("question_set_id", question_set_id) \
-        .eq("candidate_id", candidate_id) \
-        .limit(1) \
-        .execute()
-    
-    if res.data:
-        return res.data[0]
-    
-    # Also check by email if candidate_id lookup failed
-    if candidate_email:
-        res_email = supabase.table("test_results") \
+    try:
+        # Try to find existing record
+        res = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
-            .eq("candidate_email", candidate_email) \
+            .eq("candidate_id", candidate_id) \
             .limit(1) \
             .execute()
         
-        if res_email.data:
-            # Update the candidate_id if it was missing
-            existing_record = res_email.data[0]
-            if not existing_record.get("candidate_id") and candidate_id:
-                supabase.table("test_results").update({
-                    "candidate_id": candidate_id,
-                    "updated_at": datetime.utcnow().isoformat()
-                }).eq("id", existing_record["id"]).execute()
-                existing_record["candidate_id"] = candidate_id
-            return existing_record
-    
-    # If no record found, create a new one
-    new_record = {
-        "id": str(uuid.uuid4()),
-        "question_set_id": question_set_id,
-        "candidate_id": candidate_id,
-        "candidate_email": candidate_email,
-        "candidate_name": candidate_name or "Unknown",
-        "score": 0,
-        "max_score": 0,
-        "percentage": 0.0,
-        "status": "Pending",
-        "total_questions": 0,
-        "raw_feedback": "",
-        "evaluated_at": datetime.utcnow().isoformat(),
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "duration_used_seconds": 0,
-        "duration_used_minutes": 0,
-        # Initialize all violation columns to 0
-        "tab_switches": 0,
-        "inactivities": 0,
-        "text_selections": 0,
-        "copies": 0,
-        "pastes": 0,
-        "right_clicks": 0,
-        "face_not_visible": 0,
-    }
-    
-    try:
-        # Insert the new record
+        if res.data:
+            return res.data[0]
+
+        # Fallback check by email
+        if candidate_email:
+            res_email = supabase.table("test_results") \
+                .select("*") \
+                .eq("question_set_id", question_set_id) \
+                .eq("candidate_email", candidate_email) \
+                .limit(1) \
+                .execute()
+            if res_email.data:
+                return res_email.data[0]
+
+        # Create new row
+        new_record = {
+            "id": str(uuid.uuid4()),
+            "question_set_id": question_set_id,
+            "candidate_id": candidate_id,
+            "candidate_email": candidate_email,
+            "candidate_name": candidate_name or "Unknown",
+            "score": 0,
+            "max_score": 0,
+            "percentage": 0.0,
+            "status": "Pending",
+            "total_questions": 0,
+            "raw_feedback": "",
+            "evaluated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "duration_used_seconds": 0,
+            "duration_used_minutes": 0,
+            # init violations
+            **{col: 0 for col in VALID_COLUMNS},
+        }
+
         insert_res = supabase.table("test_results").insert(new_record).execute()
         return insert_res.data[0] if insert_res.data else new_record
+
     except Exception as e:
         print(f"⚠️ Error creating new record, attempting to find existing: {e}")
-        # If insert fails due to conflict, try to find the record again
+        # Retry to find existing
         res_retry = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
@@ -123,7 +104,6 @@ def find_or_create_test_result(question_set_id, candidate_id, candidate_email, c
         if res_retry.data:
             return res_retry.data[0]
         raise e
-
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
