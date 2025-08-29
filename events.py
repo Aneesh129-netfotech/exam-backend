@@ -193,7 +193,15 @@ def register_socket_events(socketio: SocketIO):
             })
 
             print(f"✅ Violation batch saved for {candidate_email or candidate_id} in set {question_set_id}: {increments}")
-
+            
+            # Instead of saving, just broadcast for live monitoring
+            socketio.emit("violation_update", {
+                    "candidate_email": candidate_email,
+                    "candidate_id": candidate_id,
+                    "question_set_id": question_set_id,
+                    **{col: data.get(col, 0) for col in VALID_COLUMNS},
+            })
+            print(f"🔔 Live violation event (not saved): {data}")
         except Exception as e:
             print(f"❌ Failed to process suspicious event: {e}")
             import traceback
