@@ -38,18 +38,21 @@ LEGACY_MAP = {
 
 
 def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    # Always prefer email + question_set_id as unique    
+    """
+    Always return a single row for (candidate_id + question_set_id).
+    If exists, return it; otherwise, create a new row with zeroed violations.
+    """
     res = supabase.table("test_results") \
         .select("*") \
         .eq("question_set_id", question_set_id) \
-        .eq("candidate_email", candidate_email) \
+        .eq("candidate_id", candidate_id) \
         .limit(1) \
         .execute()
     
     if res.data:
         return res.data[0]
 
-    # If not found, insert a new one    
+    # Insert new record if not found
     new_record = {
         "id": str(uuid.uuid4()),
         "question_set_id": question_set_id,
@@ -67,25 +70,24 @@ def find_or_create_test_result(question_set_id, candidate_id, candidate_email, c
         "updated_at": datetime.utcnow().isoformat(),
         "duration_used_seconds": 0,
         "duration_used_minutes": 0,
-        **{col: 0 for col in VALID_COLUMNS},
+        **{col: 0 for col in VALID_COLUMNS},  # all violations start at 0
     }
-    try: 
-        insert_res = supabase.table("test_results").insert(new_record).execute()
-        return insert_res.data[0] if insert_res.data else new_record
 
-    except Exception as e:
-        print(f"⚠️ Error creating new record, attempting to find existing: {e}")
-        # Retry to find existing
-        res_retry = supabase.table("test_results") \
-            .select("*") \
-            .eq("question_set_id", question_set_id) \
-            .eq("candidate_id", candidate_id) \
-            .limit(1) \
-            .execute()
-        
-        if res_retry.data:
-            return res_retry.data[0]
-        raise e
+    insert_res = supabase.table("test_results").insert(new_record).execute()
+    if insert_res.data:
+        return insert_res.data[0]
+    
+    # Fallback: if insert fails, retry fetch
+    res_retry = supabase.table("test_results") \
+        .select("*") \
+        .eq("question_set_id", question_set_id) \
+        .eq("candidate_id", candidate_id) \
+        .limit(1) \
+        .execute()
+    if res_retry.data:
+        return res_retry.data[0]
+
+    return new_record
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
@@ -98,73 +100,38 @@ def register_socket_events(socketio: SocketIO):
 
     @socketio.on("suspicious_event")
     def handle_suspicious_event(data):
+        """
+        Increment only specified violations; do NOT overwrite.
+        Always merges with existing record.
+        """
         try:
-            question_set_id = data.get("question_set_id")
+            question_set_id = data["question_set_id"]
+            candidate_id = data["candidate_id"]
             candidate_email = data.get("candidate_email")
-            candidate_id = data.get("candidate_id")
             candidate_name = data.get("candidate_name", "Unknown")
 
-            if not question_set_id:
-                print("⚠️ Missing question_set_id")
-                return
-            
-            if not candidate_email and not candidate_id:
-                print("⚠️ Missing both candidate_email and candidate_id")
-                return
-
-            # Only valid columns
-            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
-            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
-            if not increments:
-                print("⚠️ No valid violations to process")
-                return  # nothing to update
-
-            # Find or create the test result record
             existing_record = find_or_create_test_result(
                 question_set_id, candidate_id, candidate_email, candidate_name
             )
 
-            # Merge violations (add to existing counts)
-            merged_violations = {
-                col: existing_record.get(col, 0) + increments.get(col, 0) 
-                for col in VALID_COLUMNS
-            }
+            # Only increment columns provided in payload
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS if data.get(col, 0) > 0}
 
-            # Append feedback
-            violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
-            new_feedback = (existing_record.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
+            merged = {col: existing_record.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
 
-            # Update the existing record
-            update_data = {
-                **merged_violations,
-                # "raw_feedback": new_feedback,
+            # Update record
+            supabase.table("test_results").update({
+                **merged,
                 "updated_at": datetime.utcnow().isoformat()
-            }
+            }).eq("id", existing_record["id"]).execute()
 
-            supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
-
-            # Prepare payload for broadcast
-            payload = {**existing_record, **update_data}
-
-            # Always broadcast update
+            # Broadcast for live monitoring
             socketio.emit("violation_update", {
-                "candidate_email": candidate_email,
                 "candidate_id": candidate_id,
+                "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
-                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
+                **merged
             })
 
-            print(f"✅ Violation batch saved for {candidate_email or candidate_id} in set {question_set_id}: {increments}")
-            
-            # Instead of saving, just broadcast for live monitoring
-            socketio.emit("violation_update", {
-                    "candidate_email": candidate_email,
-                    "candidate_id": candidate_id,
-                    "question_set_id": question_set_id,
-                    **{col: data.get(col, 0) for col in VALID_COLUMNS},
-            })
-            print(f"🔔 Live violation event (not saved): {data}")
         except Exception as e:
             print(f"❌ Failed to process suspicious event: {e}")
-            import traceback
-            traceback.print_exc()
