@@ -108,7 +108,7 @@ def find_or_create_test_result(question_set_id, candidate_id, candidate_email, c
     
     try:
         # Insert the new record
-        insert_res = supabase.table("test_results").upsert(new_record, on_conflict=["question_set_id", "candidate_id"]).execute()
+        insert_res = supabase.table("test_results").upsert(new_record, on_conflict=["question_set_id", "candidate_id", "candidate_email"]).execute()
         return insert_res.data[0] if insert_res.data else new_record
     except Exception as e:
         print(f"⚠️ Error creating new record, attempting to find existing: {e}")
