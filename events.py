@@ -114,21 +114,16 @@ def register_socket_events(socketio: SocketIO):
                 question_set_id, candidate_id, candidate_email, candidate_name
             )
 
-            # Only increment columns provided in payload
-            # Map legacy keys to VALID_COLUMNS
+            # Map legacy keys and increment properly
             increments = {}
             for key, value in data.items():
                 if key in VALID_COLUMNS or key in LEGACY_MAP:
                     col = LEGACY_MAP.get(key, key)
                     if col in VALID_COLUMNS and value > 0:
                         increments[col] = value
-            print("Incoming data:", data)
-            print("Mapped increments:", increments)
-            print("Existing record:", existing_record)
-            
-            merged = {col: existing_record.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
 
-            print("Merged final record:", {col: existing_record.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS})
+            # Add to existing counts instead of overwriting
+            merged = {col: existing_record.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
 
             # Update record
             supabase.table("test_results").update({
