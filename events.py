@@ -1,4 +1,4 @@
-# events.py - Fixed version to ensure single row per candidate/question_set
+# events.py
 from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
@@ -37,31 +37,10 @@ LEGACY_MAP = {
 }
 
 
-def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    new_record = {
-        "question_set_id": question_set_id,
-        "candidate_id": candidate_id,
-        "candidate_email": candidate_email,
-        "candidate_name": candidate_name or "Unknown",
-        "score": 0,
-        "max_score": 0,
-        "percentage": 0.0,
-        "status": "Pending",
-        "total_questions": 0,
-        "raw_feedback": "",
-        "evaluated_at": datetime.utcnow().isoformat(),
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "duration_used_seconds": 0,
-        "duration_used_minutes": 0,
-        **{col: 0 for col in VALID_COLUMNS},
-    }
+def normalize_violations(data: dict) -> dict:
+    # Return only individual violation counts, ignore totals
+    return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
-    # Upsert ensures single row even under race conditions
-    res = supabase.table("test_results").upsert(new_record, on_conflict=["candidate_id", "question_set_id"]).execute()
-    if res.data:
-        return res.data[0]
-    return new_record
 
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
@@ -76,38 +55,73 @@ def register_socket_events(socketio: SocketIO):
     def handle_suspicious_event(data):
         try:
             question_set_id = data.get("question_set_id")
-            candidate_id = data.get("candidate_id")
             candidate_email = data.get("candidate_email")
             candidate_name = data.get("candidate_name", "Unknown")
-            
-            existing_record = find_or_create_test_result(
-                question_set_id, candidate_id, candidate_email, candidate_name
-            )
 
-            # Map legacy keys and increment properly
-            increments = {}
-            for key, value in data.items():
-                if key in VALID_COLUMNS or key in LEGACY_MAP:
-                    col = LEGACY_MAP.get(key, key)
-                    if col in VALID_COLUMNS and value > 0:
-                        increments[col] = value
+            if not question_set_id or not candidate_email:
+                print("⚠️ Missing question_set_id or candidate_email")
+                return
 
-            # Add to existing counts instead of overwriting
-            merged = {col: existing_record.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
+            # Only valid columns
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
+            if not increments:
+                return  # nothing to update
 
-            # Update record
-            supabase.table("test_results").update({
-                **merged,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", existing_record["id"]).execute()
+            # Find existing row
+            res = supabase.table("test_results") \
+                .select("*") \
+                .eq("question_set_id", question_set_id) \
+                .eq("candidate_email", candidate_email) \
+                .limit(1) \
+                .execute()
 
-            # Broadcast for live monitoring
+            if res.data:
+                # Update existing row
+                row = res.data[0]
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
+
+                # Append feedback
+                violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
+                new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
+
+                supabase.table("test_results").update({
+                    **numeric_updates,
+                    "raw_feedback": new_feedback,
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("id", row["id"]).execute()
+
+                payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
+
+            else:
+                # Create new row
+                violation_log = ", ".join([f"{k}: {v}" for k, v in increments.items()])
+                payload = {
+                    "id": str(uuid.uuid4()),
+                    "question_set_id": question_set_id,
+                    "candidate_name": candidate_name,
+                    "candidate_email": candidate_email,
+                    "status": "Pending",
+                    "score": 0,
+                    "max_score": 0,
+                    "percentage": 0.0,
+                    "total_questions": 0,
+                    "raw_feedback": f"[VIOLATION] {violation_log}",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "evaluated_at": datetime.utcnow().isoformat(),
+                    **increments
+                }
+                supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
+
+            # Always broadcast update
             socketio.emit("violation_update", {
-                "candidate_id": candidate_id,
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
-                **merged
+                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
+
         except Exception as e:
-            print(f"❌ Failed to process suspicious event: {e}")
+            print(f"❌ Failed to upsert violation batch: {e}")
