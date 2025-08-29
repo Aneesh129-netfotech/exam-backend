@@ -101,48 +101,51 @@ def generate_test_route():
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
-    Dump frontend console data directly into Supabase.
-    DB = exactly what frontend sends (no merging or backend increments).
+    Ensure final submit merges any socket violations
+    and overwrites only after taking latest console state.
     """
     try:
         data = request.get_json()
-
         question_set_id = data.get("question_set_id")
         candidate_id = data.get("candidate_id")
         candidate_email = data.get("candidate_email")
         candidate_name = data.get("candidate_name")
 
         if not question_set_id or not candidate_id:
-            return jsonify({"error": "Missing question_set_id or candidate_id"}), 400# Always ensure a row exists        
+            return jsonify({"error": "Missing question_set_id or candidate_id"}), 400
+
         existing_record = find_or_create_test_result(
             question_set_id, candidate_id, candidate_email, candidate_name
         )
 
-        # ✅ Dump everything exactly from frontend        
+        # Merge frontend violations with existing DB record
+        merged_violations = {col: data.get(col, existing_record.get(col, 0)) for col in VALID_COLUMNS}
+
+        # Prepare full update payload
         update_data = {
-            "score": data.get("score", 0),
-            "max_score": data.get("max_score", 0),
-            "percentage": data.get("percentage", 0.0),
-            "total_questions": data.get("total_questions", 0),
-            "status": data.get("status", "Pending"),
-            "raw_feedback": data.get("raw_feedback", ""),
+            "score": data.get("score", existing_record.get("score", 0)),
+            "max_score": data.get("max_score", existing_record.get("max_score", 0)),
+            "percentage": data.get("percentage", existing_record.get("percentage", 0.0)),
+            "total_questions": data.get("total_questions", existing_record.get("total_questions", 0)),
+            "status": data.get("status", existing_record.get("status", "Pending")),
+            "raw_feedback": data.get("raw_feedback", existing_record.get("raw_feedback", "")),
+            "duration_used_seconds": data.get("duration_used", existing_record.get("duration_used_seconds", 0)),
+            "duration_used_minutes": round(data.get("duration_used", existing_record.get("duration_used_seconds", 0)) / 60, 2),
             "updated_at": datetime.utcnow().isoformat(),
-            "duration_used_seconds": data.get("duration_used", 0),
-            "duration_used_minutes": round(data.get("duration_used", 0) / 60, 2),
-            **{col: data.get(col, 0) for col in VALID_COLUMNS}  # 👈 exact violations        
+            **merged_violations
         }
 
-        # Overwrite the row in Supabase        
         supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
 
         return jsonify({
             "status": "success",
-            "saved": update_data
+            "saved": update_data,
+            "violations_summary": merged_violations
         })
 
     except Exception as e:
-        print(f"❌ Error in submit_test: {str(e)}")
-        return jsonify({"error": str(e)}), 500 
+        print(f"❌ Error in submit_test: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
