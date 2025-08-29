@@ -38,23 +38,7 @@ LEGACY_MAP = {
 
 
 def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    """
-    Always return a single row for (candidate_id + question_set_id).
-    If exists, return it; otherwise, create a new row with zeroed violations.
-    """
-    res = supabase.table("test_results") \
-        .select("*") \
-        .eq("question_set_id", question_set_id) \
-        .eq("candidate_id", candidate_id) \
-        .limit(1) \
-        .execute()
-    
-    if res.data:
-        return res.data[0]
-
-    # Insert new record if not found
     new_record = {
-        "id": str(uuid.uuid4()),
         "question_set_id": question_set_id,
         "candidate_id": candidate_id,
         "candidate_email": candidate_email,
@@ -70,23 +54,13 @@ def find_or_create_test_result(question_set_id, candidate_id, candidate_email, c
         "updated_at": datetime.utcnow().isoformat(),
         "duration_used_seconds": 0,
         "duration_used_minutes": 0,
-        **{col: 0 for col in VALID_COLUMNS},  # all violations start at 0
+        **{col: 0 for col in VALID_COLUMNS},
     }
 
-    insert_res = supabase.table("test_results").insert(new_record).execute()
-    if insert_res.data:
-        return insert_res.data[0]
-    
-    # Fallback: if insert fails, retry fetch
-    res_retry = supabase.table("test_results") \
-        .select("*") \
-        .eq("question_set_id", question_set_id) \
-        .eq("candidate_id", candidate_id) \
-        .limit(1) \
-        .execute()
-    if res_retry.data:
-        return res_retry.data[0]
-
+    # Upsert ensures single row even under race conditions
+    res = supabase.table("test_results").upsert(new_record, on_conflict=["candidate_id", "question_set_id"]).execute()
+    if res.data:
+        return res.data[0]
     return new_record
 
 def register_socket_events(socketio: SocketIO):
