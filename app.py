@@ -101,74 +101,48 @@ def generate_test_route():
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
-    Upsert candidate test results + violations into a single row.
-    Overwrite DB with the final totals sent from frontend.
+    Dump frontend console data directly into Supabase.
+    DB = exactly what frontend sends (no merging or backend increments).
     """
     try:
         data = request.get_json()
+
         question_set_id = data.get("question_set_id")
         candidate_id = data.get("candidate_id")
         candidate_email = data.get("candidate_email")
         candidate_name = data.get("candidate_name")
- 
+
         if not question_set_id or not candidate_id:
-            return jsonify({"error": "Missing question_set_id or candidate_id"}), 400
- 
-        # Find or create the test result record
+            return jsonify({"error": "Missing question_set_id or candidate_id"}), 400# Always ensure a row exists        
         existing_record = find_or_create_test_result(
             question_set_id, candidate_id, candidate_email, candidate_name
         )
- 
-        # Only non-zero violation columns (for feedback logging)
-        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
-        non_zero_violations = {k: v for k, v in violations.items() if v > 0}
- 
-        # Feedback log (optional, stored in raw_feedback column)
-        violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
-        new_feedback = (existing_record.get("raw_feedback") or "") + (
-            f"\n[VIOLATION] {violation_log}" if violation_log else ""
-        )
- 
-        # ✅ Overwrite DB with frontend’s final values
+
+        # ✅ Dump everything exactly from frontend        
         update_data = {
-            "score": data.get("score", existing_record.get("score", 0)),
-            "max_score": data.get("max_score", existing_record.get("max_score", 0)),
-            "percentage": data.get("percentage", existing_record.get("percentage", 0.0)),
-            "total_questions": data.get("total_questions", existing_record.get("total_questions", 0)),
-            "status": data.get("status", existing_record.get("status", "Pending")),
-            "raw_feedback": new_feedback,
+            "score": data.get("score", 0),
+            "max_score": data.get("max_score", 0),
+            "percentage": data.get("percentage", 0.0),
+            "total_questions": data.get("total_questions", 0),
+            "status": data.get("status", "Pending"),
+            "raw_feedback": data.get("raw_feedback", ""),
             "updated_at": datetime.utcnow().isoformat(),
-            "duration_used_seconds": data.get(
-                "duration_used", existing_record.get("duration_used_seconds", 0)
-            ),
-            "duration_used_minutes": round(
-                data.get("duration_used", existing_record.get("duration_used_seconds", 0)) / 60, 2
-            ),
-            # 👇 overwrite all violation columns with frontend’s totals
-            **{col: data.get(col, 0) for col in VALID_COLUMNS}
+            "duration_used_seconds": data.get("duration_used", 0),
+            "duration_used_minutes": round(data.get("duration_used", 0) / 60, 2),
+            **{col: data.get(col, 0) for col in VALID_COLUMNS}  # 👈 exact violations        
         }
- 
-        # Update the record in Supabase
+
+        # Overwrite the row in Supabase        
         supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
- 
-        # Prepare response payload
-        payload = {**existing_record, **update_data}
- 
-        # Emit update to frontend (optional)
-        socketio.emit("violation_update", {
-            "candidate_id": candidate_id,
-            "question_set_id": question_set_id,
-            **{col: payload.get(col, 0) for col in VALID_COLUMNS},
-        })
- 
+
         return jsonify({
             "status": "success",
-            "saved": payload
+            "saved": update_data
         })
- 
+
     except Exception as e:
         print(f"❌ Error in submit_test: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500 
 
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
