@@ -182,15 +182,15 @@ def insert_manual_violations():
         )
         
         update_data = {
-            "score": data.get("score", existing_record.get("score", 0)),
-            "max_score": data.get("max_score", existing_record.get("max_score", 0)),
-            "percentage": data.get("percentage", existing_record.get("percentage", 0.0)),
-            "status": data.get("status", existing_record.get("status", "Manual Entry")),
-            "total_questions": data.get("total_questions", existing_record.get("total_questions", 0)),
-            "raw_feedback": new_feedback,
+            "score": data["score"] if "score" in data else existing_record.get("score", 0),
+            "max_score": data["max_score"] if "max_score" in data else existing_record.get("max_score", 0),
+            "percentage": data["percentage"] if "percentage" in data else existing_record.get("percentage", 0.0),
+            "total_questions": data["total_questions"] if "total_questions" in data else existing_record.get("total_questions", 0),
+            "status": data["status"] if "status" in data else existing_record.get("status", "Pending"),
+            "raw_feedback": data["raw_feedback"] if "raw_feedback" in data else existing_record.get("raw_feedback", ""),
+            "duration_used_seconds": data["duration_used_seconds"] if "duration_used_seconds" in data else existing_record.get("duration_used_seconds", 0),
+            "duration_used_minutes": data["duration_used_minutes"] if "duration_used_minutes" in data else existing_record.get("duration_used_minutes", 0),
             "updated_at": datetime.utcnow().isoformat(),
-            "duration_used_seconds": data.get("duration_used_seconds", existing_record.get("duration_used_seconds", 0)),
-            "duration_used_minutes": data.get("duration_used_minutes", existing_record.get("duration_used_minutes", 0)),
             **merged_violations
         }
         
