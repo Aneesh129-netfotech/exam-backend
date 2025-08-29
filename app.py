@@ -111,6 +111,10 @@ def submit_test():
         candidate_email = data.get("candidate_email")
         candidate_name = data.get("candidate_name")
 
+        if not candidate_id or not question_set_id:
+            print(f"⚠️ Dropping suspicious event without candidate/question_set: {data}")
+            return
+
         if not question_set_id or not candidate_id:
             return jsonify({"error": "Missing question_set_id or candidate_id"}), 400
 
@@ -118,8 +122,11 @@ def submit_test():
             question_set_id, candidate_id, candidate_email, candidate_name
         )
 
-        # Merge frontend violations with existing DB record
-        merged_violations = {col: data.get(col, existing_record.get(col, 0)) for col in VALID_COLUMNS}
+        # Instead of overwriting with 0, keep existing counts
+        merged_violations = {
+            col: existing_record.get(col, 0) + data.get(col, 0)
+            for col in VALID_COLUMNS
+        }
 
         # Prepare full update payload
         update_data = {
