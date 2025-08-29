@@ -145,13 +145,7 @@ def submit_test():
             "updated_at": datetime.utcnow().isoformat(),
             "duration_used_seconds": data.get("duration_used", existing_record.get("duration_used_seconds", 0)),
             "duration_used_minutes": round(data.get("duration_used", existing_record.get("duration_used_seconds", 0)) / 60, 2),
-            "tab_switches": data["tab_switches"],
-            "inactivities": data["inactivities"],
-            "text_selections": data["text_selections"],
-            "copies": data["copies"],
-            "pastes": data["pastes"],
-            "right_clicks": data["right_clicks"],
-            "face_not_visible": data["face_not_visible"],
+            **{col: data.get(col, 0) for col in VALID_COLUMNS}
         }
 
         # Update the record
