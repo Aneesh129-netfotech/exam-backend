@@ -37,57 +37,39 @@ LEGACY_MAP = {
 }
 
 
-def normalize_violations(data: dict) -> dict:
-    # Return only individual violation counts, ignore totals
-    return {col: data.get(col, 0) for col in VALID_COLUMNS}
-
-
 def find_or_create_test_result(question_set_id, candidate_id, candidate_email, candidate_name):
-    try:
-        # Try to find existing record
-        res = supabase.table("test_results") \
-            .select("*") \
-            .eq("question_set_id", question_set_id) \
-            .eq("candidate_id", candidate_id) \
-            .limit(1) \
-            .execute()
-        
-        if res.data:
-            return res.data[0]
+    # Always prefer email + question_set_id as unique    
+    res = supabase.table("test_results") \
+        .select("*") \
+        .eq("question_set_id", question_set_id) \
+        .eq("candidate_email", candidate_email) \
+        .limit(1) \
+        .execute()
+    
+    if res.data:
+        return res.data[0]
 
-        # Fallback check by email
-        if candidate_email:
-            res_email = supabase.table("test_results") \
-                .select("*") \
-                .eq("question_set_id", question_set_id) \
-                .eq("candidate_email", candidate_email) \
-                .limit(1) \
-                .execute()
-            if res_email.data:
-                return res_email.data[0]
-
-        # Create new row
-        new_record = {
-            "id": str(uuid.uuid4()),
-            "question_set_id": question_set_id,
-            "candidate_id": candidate_id,
-            "candidate_email": candidate_email,
-            "candidate_name": candidate_name or "Unknown",
-            "score": 0,
-            "max_score": 0,
-            "percentage": 0.0,
-            "status": "Pending",
-            "total_questions": 0,
-            "raw_feedback": "",
-            "evaluated_at": datetime.utcnow().isoformat(),
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "duration_used_seconds": 0,
-            "duration_used_minutes": 0,
-            # init violations
-            **{col: 0 for col in VALID_COLUMNS},
-        }
-
+    # If not found, insert a new one    
+    new_record = {
+        "id": str(uuid.uuid4()),
+        "question_set_id": question_set_id,
+        "candidate_id": candidate_id,
+        "candidate_email": candidate_email,
+        "candidate_name": candidate_name or "Unknown",
+        "score": 0,
+        "max_score": 0,
+        "percentage": 0.0,
+        "status": "Pending",
+        "total_questions": 0,
+        "raw_feedback": "",
+        "evaluated_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+        "duration_used_seconds": 0,
+        "duration_used_minutes": 0,
+        **{col: 0 for col in VALID_COLUMNS},
+    }
+    try: 
         insert_res = supabase.table("test_results").insert(new_record).execute()
         return insert_res.data[0] if insert_res.data else new_record
 
