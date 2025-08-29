@@ -100,16 +100,12 @@ def register_socket_events(socketio: SocketIO):
 
     @socketio.on("suspicious_event")
     def handle_suspicious_event(data):
-        """
-        Increment only specified violations; do NOT overwrite.
-        Always merges with existing record.
-        """
         try:
-            question_set_id = data["question_set_id"]
-            candidate_id = data["candidate_id"]
+            question_set_id = data.get("question_set_id")
+            candidate_id = data.get("candidate_id")
             candidate_email = data.get("candidate_email")
             candidate_name = data.get("candidate_name", "Unknown")
-
+            
             existing_record = find_or_create_test_result(
                 question_set_id, candidate_id, candidate_email, candidate_name
             )
