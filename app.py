@@ -1,4 +1,4 @@
-# app.py - Fixed version to ensure single row per candidate/question_set
+# app.py
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -10,7 +10,7 @@ from supabase import create_client
 from datetime import datetime
 import uuid
 
-from events import register_socket_events, VALID_COLUMNS, find_or_create_test_result
+from events import register_socket_events, VALID_COLUMNS
 from test_generator import generate_questions, TestRequest
 
 load_dotenv()
@@ -98,60 +98,96 @@ def generate_test_route():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
-    Ensure final submit merges any socket violations
-    and overwrites only after taking latest console state.
+    Upsert candidate test results + violations into a single row.
     """
     try:
         data = request.get_json()
         question_set_id = data.get("question_set_id")
-        candidate_id = data.get("candidate_id")
         candidate_email = data.get("candidate_email")
-        candidate_name = data.get("candidate_name")
 
-        if not candidate_id or not question_set_id:
-            print(f"⚠️ Dropping suspicious event without candidate/question_set: {data}")
-            return
+        if not question_set_id or not candidate_email:
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
 
-        if not question_set_id or not candidate_id:
-            return jsonify({"error": "Missing question_set_id or candidate_id"}), 400
+        # Only non-zero violation columns
+        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+        non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
-        existing_record = find_or_create_test_result(
-            question_set_id, candidate_id, candidate_email, candidate_name
-        )
+        # Check if a record already exists
+        res = supabase.table("test_results") \
+            .select("*") \
+            .eq("question_set_id", question_set_id) \
+            .eq("candidate_email", candidate_email) \
+            .eq("exam_id", data.get("exam_id")) \
+            .limit(1) \
+            .execute()
 
-        # Instead of overwriting with 0, keep existing counts
-        merged_violations = {
-            col: existing_record.get(col, 0) + data.get(col, 0)
-            for col in VALID_COLUMNS
-        }
+        if res.data:
+            # Update existing row
+            row = res.data[0]
 
-        # Prepare full update payload
-        update_data = {
-            "score": data.get("score", existing_record.get("score", 0)),
-            "max_score": data.get("max_score", existing_record.get("max_score", 0)),
-            "percentage": data.get("percentage", existing_record.get("percentage", 0.0)),
-            "total_questions": data.get("total_questions", existing_record.get("total_questions", 0)),
-            "status": data.get("status", existing_record.get("status", "Pending")),
-            "raw_feedback": data.get("raw_feedback", existing_record.get("raw_feedback", "")),
-            "duration_used_seconds": data.get("duration_used", existing_record.get("duration_used_seconds", 0)),
-            "duration_used_minutes": round(data.get("duration_used", existing_record.get("duration_used_seconds", 0)) / 60, 2),
-            "updated_at": datetime.utcnow().isoformat(),
-            **merged_violations
-        }
+            # Merge violations
+            merged_violations = {col: row.get(col, 0) + non_zero_violations.get(col, 0) for col in VALID_COLUMNS}
 
-        supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
+            # Append feedback for violations only
+            violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
+            new_feedback = (row.get("raw_feedback") or "") + (f"\n[VIOLATION] {violation_log}" if violation_log else "")
+
+            # Update scores
+            update_data = {
+                "score": data.get("score", row.get("score", 0)),
+                "max_score": data.get("max_score", row.get("max_score", 0)),
+                "percentage": data.get("percentage", row.get("percentage", 0.0)),
+                "total_questions": data.get("total_questions", row.get("total_questions", 0)),
+                "raw_feedback": new_feedback,
+                "updated_at": datetime.utcnow().isoformat(),
+                **merged_violations
+            }
+
+            supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
+            payload = {**row, **update_data}
+
+        else:
+            # Create a new row if it doesn't exist
+            violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
+            payload = {
+                "id": str(uuid.uuid4()),
+                "exam_id": data.get("exam_id"),
+                "question_set_id": question_set_id,
+                "candidate_name": data.get("candidate_name"),
+                "candidate_email": candidate_email,
+                "status": data.get("status", "Pending"),
+                "score": data.get("score", 0),
+                "max_score": data.get("max_score", len(data.get("questions", [])) * 10),
+                "percentage": data.get("percentage", 0.0),
+                "total_questions": data.get("total_questions", len(data.get("questions", []))),
+                "raw_feedback": f"[VIOLATION] {violation_log}" if violation_log else data.get("raw_feedback", ""),
+                "evaluated_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "duration_used_seconds": data.get("duration_used", 0),
+                "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
+                "candidate_id": data.get("candidate_id"),
+                **non_zero_violations
+            }
+            supabase.table("test_results").insert(payload).execute()
+
+        # Optionally emit an update to frontend
+        socketio.emit("violation_update", {
+            "candidate_email": candidate_email,
+            "question_set_id": question_set_id,
+            **{col: payload.get(col, 0) for col in VALID_COLUMNS},
+        })
 
         return jsonify({
             "status": "success",
-            "saved": update_data,
-            "violations_summary": merged_violations
+            "saved": payload
         })
 
     except Exception as e:
-        print(f"❌ Error in submit_test: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/violations/manual", methods=["POST"])
@@ -163,63 +199,52 @@ def insert_manual_violations():
         data = request.get_json()
         print(f"📥 Manual violation insert request: {data}")
         
-        question_set_id = data.get("question_set_id", f"manual-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}")
-        candidate_id = data.get("candidate_id", f"manual-{str(uuid.uuid4())[:8]}")
-        candidate_email = data.get("candidate_email", "manual@example.com")
-        candidate_name = data.get("candidate_name", "Manual Entry")
-        
-        # Find or create the test result record
-        existing_record = find_or_create_test_result(
-            question_set_id, candidate_id, candidate_email, candidate_name
-        )
-        
         # Extract individual violation counts
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         
-        # Merge with existing violations
-        merged_violations = {
-            col: existing_record.get(col, 0) + violations.get(col, 0) 
-            for col in VALID_COLUMNS
-        }
-        
-        # Prepare update data
-        violation_summary = ', '.join([f'{k}={v}' for k, v in violations.items() if v > 0])
-        new_feedback = (existing_record.get("raw_feedback") or "") + (
-            f"\nManual violation entry: {violation_summary}" if violation_summary else ""
-        )
-        
-        update_data = {
-            "score": data["score"] if "score" in data else existing_record.get("score", 0),
-            "max_score": data["max_score"] if "max_score" in data else existing_record.get("max_score", 0),
-            "percentage": data["percentage"] if "percentage" in data else existing_record.get("percentage", 0.0),
-            "total_questions": data["total_questions"] if "total_questions" in data else existing_record.get("total_questions", 0),
-            "status": data["status"] if "status" in data else existing_record.get("status", "Pending"),
-            "raw_feedback": data["raw_feedback"] if "raw_feedback" in data else existing_record.get("raw_feedback", ""),
-            "duration_used_seconds": data["duration_used_seconds"] if "duration_used_seconds" in data else existing_record.get("duration_used_seconds", 0),
-            "duration_used_minutes": data["duration_used_minutes"] if "duration_used_minutes" in data else existing_record.get("duration_used_minutes", 0),
+        # Prepare the record
+        params = {
+            "id": str(uuid.uuid4()),
+            "question_set_id": data.get("question_set_id", f"manual-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"),
+            "candidate_email": data.get("candidate_email", "manual@example.com"),
+            "candidate_name": data.get("candidate_name", "Manual Entry"),
+            "score": data.get("score", 0),
+            "max_score": data.get("max_score", 0),
+            "percentage": data.get("percentage", 0.0),
+            "status": data.get("status", "Manual Entry"),
+            "total_questions": data.get("total_questions", 0),
+            "raw_feedback": data.get("raw_feedback", f"Manual violation entry: {', '.join([f'{k}={v}' for k,v in violations.items() if v > 0])}"),
+            "evaluated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
-            **merged_violations
+            "duration_used_seconds": data.get("duration_used_seconds", 0),
+            "duration_used_minutes": data.get("duration_used_minutes", 0),
+            "candidate_id": data.get("candidate_id"),
+            **violations,  # individual columns only
         }
         
-        # Update the record
-        response = supabase.table("test_results").update(update_data).eq("id", existing_record["id"]).execute()
+        print(f"📝 Inserting manual violation record: {params}")
+        
+        # Insert into Supabase
+        response = supabase.table("test_results").upsert(params, on_conflict=["candidate_email", "question_set_id"]).execute()
 
         if response.data:
-            print(f"✅ Manual violation record updated successfully: {existing_record['id']}")
+            print(f"✅ Manual violation record created successfully: {response.data[0]['id']}")
             return jsonify({
                 "status": "success",
-                "message": "Manual violation record updated successfully",
-                "data": {**existing_record, **update_data},
+                "message": "Manual violation record created successfully",
+                "data": response.data[0],
                 "violations_summary": violations
             })
         else:
-            return jsonify({"error": "Failed to update record"}), 500
+            return jsonify({"error": "Failed to create record"}), 500
             
     except Exception as e:
         print(f"❌ Manual violation insert failed: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
+# Add this endpoint for testing the connection
 @app.route("/api/violations/test", methods=["GET"])
 def test_violations_endpoint():
     """
