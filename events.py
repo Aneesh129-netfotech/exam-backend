@@ -97,7 +97,13 @@ def register_socket_events(socketio: SocketIO):
 
             else:
                 # Create new row
-                violation_log = ", ".join([f"{k}: {v}" for k, v in increments.items()])
+                new_feedback = ""
+                for col, inc in increments.items():
+                    for _ in range(inc):
+                        line = f"[VIOLATION] {col}: +1"
+                        new_feedback += f"\n{line}"
+                        print(line)  # console log identical to Supabase
+
                 payload = {
                     "id": str(uuid.uuid4()),
                     "question_set_id": question_set_id,
@@ -108,7 +114,7 @@ def register_socket_events(socketio: SocketIO):
                     "max_score": 0,
                     "percentage": 0.0,
                     "total_questions": 0,
-                    "raw_feedback": f"[VIOLATION] {violation_log}",
+                    "raw_feedback": new_feedback,
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
