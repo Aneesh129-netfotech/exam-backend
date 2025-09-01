@@ -83,12 +83,15 @@ def register_socket_events(socketio: SocketIO):
                 new_feedback = row.get("raw_feedback", "")
 
                 # Update numeric counts
-                numeric_updates = increments  # ✅ console values direct overwrite 
+                numeric_updates = {
+                    col: row.get(col, 0) + increments.get(col, 0)
+                    for col in VALID_COLUMNS
+                } 
 
                 # Append feedback in summary form
                 if increments:
                     summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
-                    new_feedback += f"\n[VIOLATIONS] {summary}"
+                    new_feedback = f"Total Violations: {', '.join([f'{col}={val}' for col,val in numeric_updates.items()])}"
                     print(f"[VIOLATIONS] {summary}")
 
                 supabase.table("test_results").update({
