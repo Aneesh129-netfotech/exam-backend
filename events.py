@@ -79,7 +79,6 @@ def register_socket_events(socketio: SocketIO):
                 new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
 
                 supabase.table("test_results").update({
-                    "raw_feedback": new_feedback,
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("id", row["id"]).execute()
 
