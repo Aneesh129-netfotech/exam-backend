@@ -129,8 +129,7 @@ def submit_test():
             merged_violations = {col: violations.get(col, 0) for col in VALID_COLUMNS}
 
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
-            new_feedback = (row.get("raw_feedback") or "") + (
-                f"\n[VIOLATION] {violation_log}" if violation_log else ""            )
+            new_feedback = f"[FINAL VIOLATIONS] {violation_log}" if violation_log else "" 
 
             update_data = {
                 "score": data.get("score", row.get("score", 0)),
