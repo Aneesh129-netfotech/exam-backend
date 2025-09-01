@@ -267,6 +267,66 @@ def test_violations_endpoint():
         "valid_columns": list(VALID_COLUMNS)
     })
 
+@app.route("/api/violations/sync", methods=["POST"])
+def sync_violations():
+    """
+    Sync absolute violation counts from console into Supabase
+    (overwrites previous counts instead of incrementing).
+    """
+    try:
+        data = request.get_json()
+        question_set_id = data.get("question_set_id")
+        candidate_email = data.get("candidate_email")
+
+        if not question_set_id or not candidate_email:
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
+
+        # Get absolute violation counts
+        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+
+        # Find existing row
+        res = supabase.table("test_results") \
+            .select("*") \
+            .eq("question_set_id", question_set_id) \
+            .eq("candidate_email", candidate_email) \
+            .limit(1) \
+            .execute()
+
+        if res.data:
+            row = res.data[0]
+
+            update_data = {
+                **violations,  # overwrite with absolute values
+                "updated_at": datetime.utcnow().isoformat(),
+                "raw_feedback": data.get("raw_feedback", row.get("raw_feedback", "")),
+            }
+
+            supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
+            payload = {**row, **update_data}
+
+        else:
+            payload = {
+                "id": str(uuid.uuid4()),
+                "question_set_id": question_set_id,
+                "candidate_email": candidate_email,
+                "candidate_name": data.get("candidate_name", ""),
+                "status": data.get("status", "Synced"),
+                "score": data.get("score", 0),
+                "max_score": data.get("max_score", 0),
+                "percentage": data.get("percentage", 0.0),
+                "total_questions": data.get("total_questions", 0),
+                "raw_feedback": data.get("raw_feedback", ""),
+                "evaluated_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                **violations,
+            }
+            supabase.table("test_results").insert(payload).execute()
+
+        return jsonify({"status": "success", "synced": payload})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
