@@ -110,11 +110,11 @@ def submit_test():
         candidate_email = data.get("candidate_email")
 
         if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400# Take exact frontend totals        
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400# Exact frontend totals        
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
-        # Check if record exists        
+        # Check if row exists        
         res = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
@@ -125,10 +125,9 @@ def submit_test():
         if res.data:
             row = res.data[0]
 
-            # ✅ Overwrite with frontend totals (not add)            
+            # ✅ Overwrite with frontend totals            
             merged_violations = {col: violations.get(col, 0) for col in VALID_COLUMNS}
 
-            # Append feedback (only log non-zero counts for history)            
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
             new_feedback = (row.get("raw_feedback") or "") + (
                 f"\n[VIOLATION] {violation_log}" if violation_log else ""            )
@@ -147,7 +146,7 @@ def submit_test():
             payload = {**row, **update_data}
 
         else:
-            # Insert new row            
+            # New row            
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
             payload = {
                 "id": str(uuid.uuid4()),
@@ -171,7 +170,7 @@ def submit_test():
             }
             supabase.table("test_results").insert(payload).execute()
 
-        # Emit real-time update        
+        # Emit final overwrite        
         socketio.emit("violation_update", {
             "candidate_email": candidate_email,
             "question_set_id": question_set_id,
