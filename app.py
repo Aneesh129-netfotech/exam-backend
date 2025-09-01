@@ -138,10 +138,9 @@ def submit_test():
             }
 
             # Append feedback in summary form
-            if non_zero_violations:
-                summary = ", ".join([f"{col}={val}" for col, val in non_zero_violations.items()])
-                new_feedback += f"\n[VIOLATIONS] {summary}"
-                print(f"[VIOLATIONS] {summary}")
+            if merged_violations:
+                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in merged_violations.items()])
+                print(f"[VIOLATIONS] {new_feedback}")
 
             # Update scores
             update_data = {
