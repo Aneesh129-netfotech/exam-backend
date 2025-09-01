@@ -243,6 +243,80 @@ def insert_manual_violations():
         print(f"❌ Manual violation insert failed: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/violations/insert", methods=["POST"])
+def insert_violation():
+    try:
+        data = request.json
+        question_set_id = data.get("question_set_id")
+        candidate_email = data.get("candidate_email")
+        candidate_name = data.get("candidate_name", "Unknown")
+
+        if not question_set_id or not candidate_email:
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
+
+        # Treat values as totals
+        totals = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
+
+        # Find existing row
+        res = supabase.table("test_results") \
+            .select("*") \
+            .eq("question_set_id", question_set_id) \
+            .eq("candidate_email", candidate_email) \
+            .limit(1) \
+            .execute()
+
+        if res.data:
+            row = res.data[0]
+
+            # Compute deltas
+            increments = {}
+            numeric_updates = {}
+            for col in VALID_COLUMNS:
+                old_val = row.get(col, 0)
+                new_val = totals.get(col, 0)
+                delta = max(0, new_val - old_val)
+                if delta > 0:
+                    increments[col] = delta
+                numeric_updates[col] = new_val
+
+            if not increments:
+                return jsonify({"message": "No new violations"}), 200
+
+            violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
+            new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
+
+            supabase.table("test_results").update({
+                **numeric_updates,
+                "raw_feedback": new_feedback,
+                "updated_at": datetime.utcnow().isoformat()
+            }).eq("id", row["id"]).execute()
+
+            return jsonify({"message": "Violation updated", "increments": increments}), 200
+
+        else:
+            # Create new row if no existing record
+            payload = {
+                "id": str(uuid.uuid4()),
+                "question_set_id": question_set_id,
+                "candidate_name": candidate_name,
+                "candidate_email": candidate_email,
+                "status": "Pending",
+                "score": 0,
+                "max_score": 0,
+                "percentage": 0.0,
+                "total_questions": 0,
+                "raw_feedback": "[VIOLATION] " + ", ".join([f"{k}: {v}" for k, v in totals.items() if v > 0]),
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "evaluated_at": datetime.utcnow().isoformat(),
+                **totals
+            }
+            supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
+
+            return jsonify({"message": "Violation inserted", "totals": totals}), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Add this endpoint for testing the connection
 @app.route("/api/violations/test", methods=["GET"])
