@@ -41,7 +41,6 @@ def normalize_violations(data: dict) -> dict:
     # Return only individual violation counts, ignore totals
     return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
-
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
     def handle_connect():
@@ -62,9 +61,9 @@ def register_socket_events(socketio: SocketIO):
                 print("⚠️ Missing question_set_id or candidate_email")
                 return
 
-            # Only valid columns
-            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
-            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
+            # Normalize violations
+            increments = normalize_violations(data)
+            increments = {k: v for k, v in increments.items() if v > 0}
             if not increments:
                 return  # nothing to update
 
