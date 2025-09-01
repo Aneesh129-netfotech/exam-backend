@@ -77,14 +77,13 @@ def register_socket_events(socketio: SocketIO):
                 .execute()
 
             if res.data:
+                # Update existing row
                 row = res.data[0]
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
 
-                # Overwrite instead of increment
-                numeric_updates = {col: increments.get(col, row.get(col, 0)) for col in VALID_COLUMNS}
-
-                # Feedback (optional: can still append to raw_feedback if you want history)
-                violation_log = ", ".join([f"{k}: {v}" for k, v in increments.items()])
-                new_feedback = f"[SNAPSHOT] {violation_log}"
+                # Append feedback
+                violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
+                new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
 
                 supabase.table("test_results").update({
                     **numeric_updates,
