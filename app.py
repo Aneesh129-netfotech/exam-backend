@@ -102,7 +102,7 @@ def generate_test_route():
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
-    Upsert candidate test results + overwrite violations with final frontend totals.
+    Upsert candidate test results + violations into a single row.
     """
     try:
         data = request.get_json()
@@ -110,27 +110,33 @@ def submit_test():
         candidate_email = data.get("candidate_email")
 
         if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400# Exact frontend totals        
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
+
+        # Only non-zero violation columns
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
-        # Check if row exists        
+        # Check if a record already exists
         res = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
             .eq("candidate_email", candidate_email) \
+            .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
 
         if res.data:
+            # Update existing row
             row = res.data[0]
 
-            # ✅ Overwrite with frontend totals            
-            merged_violations = {col: violations.get(col, 0) for col in VALID_COLUMNS}
+            # Merge violations
+            merged_violations = {col: row.get(col, 0) + non_zero_violations.get(col, 0) for col in VALID_COLUMNS}
 
-            violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
-            new_feedback = f"[FINAL VIOLATIONS] {violation_log}" if violation_log else "" 
+            # Append feedback for violations only
+            violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
+            new_feedback = (row.get("raw_feedback") or "") + (f"\n[VIOLATION] {violation_log}" if violation_log else "")
 
+            # Update scores
             update_data = {
                 "score": data.get("score", row.get("score", 0)),
                 "max_score": data.get("max_score", row.get("max_score", 0)),
@@ -145,31 +151,31 @@ def submit_test():
             payload = {**row, **update_data}
 
         else:
-            # New row            
+            # Create a new row if it doesn't exist
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
             payload = {
                 "id": str(uuid.uuid4()),
-                "question_set_id": question_set_id,
                 "exam_id": data.get("exam_id"),
+                "question_set_id": question_set_id,
+                "candidate_name": data.get("candidate_name"),
+                "candidate_email": candidate_email,
+                "status": data.get("status", "Pending"),
                 "score": data.get("score", 0),
-                "max_score": data.get("max_score", 0),
+                "max_score": data.get("max_score", len(data.get("questions", [])) * 10),
                 "percentage": data.get("percentage", 0.0),
-                "status": data.get("status", "in-progress"),
-                "total_questions": data.get("total_questions", 0),
-                "raw_feedback": data.get("raw_feedback", f"[VIOLATION] {violation_log}"),
+                "total_questions": data.get("total_questions", len(data.get("questions", []))),
+                "raw_feedback": f"[VIOLATION] {violation_log}" if violation_log else data.get("raw_feedback", ""),
                 "evaluated_at": datetime.utcnow().isoformat(),
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
-                "duration_used_seconds": data.get("duration_used_seconds", 0),
-                "duration_used_minutes": data.get("duration_used_minutes", 0),
+                "duration_used_seconds": data.get("duration_used", 0),
+                "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
                 "candidate_id": data.get("candidate_id"),
-                "candidate_email": candidate_email,
-                "candidate_name": data.get("candidate_name", ""),
-                **violations
+                **non_zero_violations
             }
             supabase.table("test_results").insert(payload).execute()
 
-        # Emit final overwrite        
+        # Optionally emit an update to frontend
         socketio.emit("violation_update", {
             "candidate_email": candidate_email,
             "question_set_id": question_set_id,
@@ -182,7 +188,7 @@ def submit_test():
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500 
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
@@ -220,13 +226,7 @@ def insert_manual_violations():
         print(f"📝 Inserting manual violation record: {params}")
         
         # Insert into Supabase
-        response = supabase.table("test_results") \
-            .upsert(params, on_conflict=["candidate_email", "question_set_id"]) \
-            .execute()
-        if response.get("status_code") not in [200, 201]:
-            print("Upsert failed:", response)
-        else:
-            print("Upsert success!")
+        response = supabase.table("test_results").upsert(params, on_conflict=["candidate_email", "question_set_id"]).execute()
 
         if response.data:
             print(f"✅ Manual violation record created successfully: {response.data[0]['id']}")
@@ -257,66 +257,6 @@ def test_violations_endpoint():
         "valid_columns": list(VALID_COLUMNS)
     })
 
-@app.route("/api/violations/sync", methods=["POST"])
-def sync_violations():
-    """
-    Sync absolute violation counts from console into Supabase
-    (overwrites previous counts instead of incrementing).
-    """
-    try:
-        data = request.get_json()
-        question_set_id = data.get("question_set_id")
-        candidate_email = data.get("candidate_email")
-
-        if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
-
-        # Get absolute violation counts
-        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
-
-        # Find existing row
-        res = supabase.table("test_results") \
-            .select("*") \
-            .eq("question_set_id", question_set_id) \
-            .eq("candidate_email", candidate_email) \
-            .limit(1) \
-            .execute()
-
-        if res.data:
-            row = res.data[0]
-
-            update_data = {
-                **violations,  # overwrite with absolute values
-                "updated_at": datetime.utcnow().isoformat(),
-                "raw_feedback": data.get("raw_feedback", row.get("raw_feedback", "")),
-            }
-
-            supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
-            payload = {**row, **update_data}
-
-        else:
-            payload = {
-                "id": str(uuid.uuid4()),
-                "question_set_id": question_set_id,
-                "candidate_email": candidate_email,
-                "candidate_name": data.get("candidate_name", ""),
-                "status": data.get("status", "Synced"),
-                "score": data.get("score", 0),
-                "max_score": data.get("max_score", 0),
-                "percentage": data.get("percentage", 0.0),
-                "total_questions": data.get("total_questions", 0),
-                "raw_feedback": data.get("raw_feedback", ""),
-                "evaluated_at": datetime.utcnow().isoformat(),
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat(),
-                **violations,
-            }
-            supabase.table("test_results").insert(payload).execute()
-
-        return jsonify({"status": "success", "synced": payload})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
