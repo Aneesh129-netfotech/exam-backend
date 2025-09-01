@@ -154,24 +154,26 @@ def submit_test():
             # Create a new row if it doesn't exist
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
             payload = {
-            "id": str(uuid.uuid4()),  # let app generate ID
-            "question_set_id": question_set_id,
-            "candidate_email": candidate_email,
-            "candidate_name": data.get("candidate_name"),
-            "score": data.get("score", 0),
-            "max_score": data.get("max_score", 0),
-            "percentage": data.get("percentage", 0.0),
-            "status": data.get("status", "in-progress"),
-            "total_questions": data.get("total_questions", 0),
-            "raw_feedback": data.get("raw_feedback", ""),
-            "evaluated_at": datetime.utcnow().isoformat(),
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "duration_used_seconds": data.get("duration_used_seconds", 0),
-            "duration_used_minutes": data.get("duration_used_minutes", 0),
-            "candidate_id": data.get("candidate_id"),
-            **violations
-        }
+                "id": str(uuid.uuid4()),
+                "question_set_id": question_set_id,
+                "exam_id": data.get("exam_id"),
+                "score": data.get("score", 0),
+                "max_score": data.get("max_score", 0),
+                "percentage": data.get("percentage", 0.0),
+                "status": data.get("status", "in-progress"),
+                "total_questions": data.get("total_questions", 0),
+                "raw_feedback": data.get("raw_feedback", ""),
+                "evaluated_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "duration_used_seconds": data.get("duration_used_seconds", 0),
+                "duration_used_minutes": data.get("duration_used_minutes", 0),
+                "candidate_id": data.get("candidate_id"),
+                "candidate_email": candidate_email,
+                "candidate_name": data.get("candidate_name", ""),
+                **violations
+            }
+
         supabase.table("test_results").insert(payload).execute()
 
         # Optionally emit an update to frontend
@@ -230,6 +232,8 @@ def insert_manual_violations():
             .execute()
         if response.get("status_code") not in [200, 201]:
             print("Upsert failed:", response)
+        else:
+            print("Upsert success!")
 
         if response.data:
             print(f"✅ Manual violation record created successfully: {response.data[0]['id']}")
