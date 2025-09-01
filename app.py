@@ -102,7 +102,7 @@ def generate_test_route():
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
-    Upsert candidate test results + violations into a single row.
+    Upsert candidate test results + overwrite violations with final frontend totals.
     """
     try:
         data = request.get_json()
@@ -110,54 +110,44 @@ def submit_test():
         candidate_email = data.get("candidate_email")
 
         if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
-
-        # Only non-zero violation columns
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400# Take exact frontend totals        
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
-        # Check if a record already exists
+        # Check if record exists        
         res = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
             .eq("candidate_email", candidate_email) \
-            .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
 
         if res.data:
-            # Update existing row
             row = res.data[0]
 
-            # Merge violations
-            # Merge violations with existing row (if any)
-            merged_violations = {}
-            for col in VALID_COLUMNS:
-                merged_violations[col] = data.get(col, 0)
+            # ✅ Overwrite with frontend totals (not add)            
+            merged_violations = {col: violations.get(col, 0) for col in VALID_COLUMNS}
 
-            # Append feedback for violations only
-            violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
-            new_feedback = (row.get("raw_feedback") or "") + (f"\n[VIOLATION] {violation_log}" if violation_log else "")
+            # Append feedback (only log non-zero counts for history)            
+            violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
+            new_feedback = (row.get("raw_feedback") or "") + (
+                f"\n[VIOLATION] {violation_log}" if violation_log else ""            )
 
-            # Extract absolute violation counts from request
-            clean_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
-
-            # Update scores
             update_data = {
-                **clean_violations,
                 "score": data.get("score", row.get("score", 0)),
                 "max_score": data.get("max_score", row.get("max_score", 0)),
                 "percentage": data.get("percentage", row.get("percentage", 0.0)),
                 "total_questions": data.get("total_questions", row.get("total_questions", 0)),
                 "raw_feedback": new_feedback,
-                "updated_at": datetime.utcnow().isoformat()
+                "updated_at": datetime.utcnow().isoformat(),
+                **merged_violations
             }
 
             supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
             payload = {**row, **update_data}
 
         else:
-            # Create a new row if it doesn't exist
+            # Insert new row            
             violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
             payload = {
                 "id": str(uuid.uuid4()),
@@ -168,7 +158,7 @@ def submit_test():
                 "percentage": data.get("percentage", 0.0),
                 "status": data.get("status", "in-progress"),
                 "total_questions": data.get("total_questions", 0),
-                "raw_feedback": data.get("raw_feedback", ""),
+                "raw_feedback": data.get("raw_feedback", f"[VIOLATION] {violation_log}"),
                 "evaluated_at": datetime.utcnow().isoformat(),
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
@@ -179,10 +169,9 @@ def submit_test():
                 "candidate_name": data.get("candidate_name", ""),
                 **violations
             }
+            supabase.table("test_results").insert(payload).execute()
 
-        supabase.table("test_results").insert(payload).execute()
-
-        # Optionally emit an update to frontend
+        # Emit real-time update        
         socketio.emit("violation_update", {
             "candidate_email": candidate_email,
             "question_set_id": question_set_id,
@@ -195,7 +184,7 @@ def submit_test():
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500 
 
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
