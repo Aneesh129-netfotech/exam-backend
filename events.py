@@ -41,6 +41,7 @@ def normalize_violations(data: dict) -> dict:
     # Return only individual violation counts, ignore totals
     return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
+
 def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
     def handle_connect():
@@ -59,11 +60,15 @@ def register_socket_events(socketio: SocketIO):
 
             if not question_set_id or not candidate_email:
                 print("⚠️ Missing question_set_id or candidate_email")
-                return # Keep only violations >0        
-            increments = normalize_violations(data)
-            increments = {k: v for k, v in increments.items() if v > 0}
+                return
+
+            # Only valid columns
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
             if not increments:
-                return# Find existing row        
+                return  # nothing to update
+
+            # Find existing row
             res = supabase.table("test_results") \
                 .select("*") \
                 .eq("question_set_id", question_set_id) \
@@ -72,20 +77,24 @@ def register_socket_events(socketio: SocketIO):
                 .execute()
 
             if res.data:
+                # Update existing row
                 row = res.data[0]
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
 
-                # ✅ Append only raw_feedback (don’t touch counters)            
+                # Append feedback
                 violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
                 new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
 
                 supabase.table("test_results").update({
+                    **numeric_updates,
+                    "raw_feedback": new_feedback,
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("id", row["id"]).execute()
 
-                payload = {**row, "raw_feedback": new_feedback}
+                payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
 
             else:
-                # First record → only store feedback            
+                # Create new row
                 violation_log = ", ".join([f"{k}: {v}" for k, v in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
@@ -101,19 +110,18 @@ def register_socket_events(socketio: SocketIO):
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
+                    **increments
                 }
-                supabase.table("test_results").upsert(
-                    payload, on_conflict=["candidate_email", "question_set_id"]
-                ).execute()
+                supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
 
-            # Send live feedback (without counters)        
+            # Always broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
-                "raw_feedback": payload.get("raw_feedback", "")
+                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
-            print(f"✅ Logged violation feedback for {candidate_email} in set {question_set_id}: {increments}")
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
 
         except Exception as e:
-            print(f"❌ Failed to log violation feedback: {e}")
+            print(f"❌ Failed to upsert violation batch: {e}")
