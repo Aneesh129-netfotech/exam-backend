@@ -82,8 +82,10 @@ def register_socket_events(socketio: SocketIO):
                 numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
 
                 # Append feedback
-                violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
-                new_feedback = (row.get("raw_feedback") or "") + f"\n[VIOLATION] {violation_log}"
+                new_feedback = row.get("raw_feedback") or "" 
+                for col, inc in increments.items():
+                    for _ in range(inc):
+                        new_feedback += f"\n[VIOLATION] {col}: +1"
 
                 supabase.table("test_results").update({
                     **numeric_updates,
