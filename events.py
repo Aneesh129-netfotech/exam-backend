@@ -63,7 +63,10 @@ def register_socket_events(socketio: SocketIO):
                 return
 
             # Only valid columns
-            totals = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
+            if not increments:
+                return  # nothing to update
 
             # Find existing row
             res = supabase.table("test_results") \
@@ -74,22 +77,9 @@ def register_socket_events(socketio: SocketIO):
                 .execute()
 
             if res.data:
+                # Update existing row
                 row = res.data[0]
-
-                # Compute increments = new_total - old_total
-                increments = {}
-                numeric_updates = {}
-                for col in VALID_COLUMNS:
-                    old_val = row.get(col, 0)
-                    new_val = totals.get(col, 0)
-                    delta = max(0, new_val - old_val)  # prevent negatives
-                    if delta > 0:
-                        increments[col] = delta
-                    numeric_updates[col] = new_val  # always store latest total
-
-                # Skip if no actual increments
-                if not increments:
-                    return
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
 
                 # Append feedback
                 violation_log = ", ".join([f"{k}: +{v}" for k, v in increments.items()])
@@ -104,7 +94,8 @@ def register_socket_events(socketio: SocketIO):
                 payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
 
             else:
-                # New row on first violation event
+                # Create new row
+                violation_log = ", ".join([f"{k}: {v}" for k, v in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
                     "question_set_id": question_set_id,
@@ -115,11 +106,11 @@ def register_socket_events(socketio: SocketIO):
                     "max_score": 0,
                     "percentage": 0.0,
                     "total_questions": 0,
-                    "raw_feedback": "[VIOLATION] " + ", ".join([f"{k}: {v}" for k, v in totals.items() if v > 0]),
+                    "raw_feedback": f"[VIOLATION] {violation_log}",
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
-                    **totals
+                    **increments
                 }
                 supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
 
@@ -130,7 +121,7 @@ def register_socket_events(socketio: SocketIO):
                 **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
-            print(f"✅ Violation totals saved for {candidate_email} in set {question_set_id}: {totals}")
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
 
         except Exception as e:
             print(f"❌ Failed to upsert violation batch: {e}")
