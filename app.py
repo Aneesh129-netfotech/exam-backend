@@ -139,7 +139,9 @@ def submit_test():
             new_feedback = row.get("raw_feedback") or "" 
             for col, val in non_zero_violations.items():
                 for _ in range(val):
-                    new_feedback += f"\n[VIOLATION] {col}: +1"
+                    line = f"[VIOLATION] {col}: +1"
+                    new_feedback += f"\n{line}"
+                    print(line)  # keep console and Supabase identical 
 
             # Update scores
             update_data = {
@@ -157,7 +159,13 @@ def submit_test():
 
         else:
             # Create a new row if it doesn't exist
-            violation_log = ", ".join([f"{k}: {v}" for k, v in non_zero_violations.items()])
+            new_feedback = data.get("raw_feedback", "")
+            for col, val in non_zero_violations.items():
+                for _ in range(val):
+                    line = f"[VIOLATION] {col}: +1"
+                    new_feedback += f"\n{line}"
+                    print(line)  # keep console identical to Supabase
+
             payload = {
                 "id": str(uuid.uuid4()),
                 "exam_id": data.get("exam_id"),
@@ -169,7 +177,7 @@ def submit_test():
                 "max_score": data.get("max_score", len(data.get("questions", [])) * 10),
                 "percentage": data.get("percentage", 0.0),
                 "total_questions": data.get("total_questions", len(data.get("questions", []))),
-                "raw_feedback": f"[VIOLATION] {violation_log}" if violation_log else data.get("raw_feedback", ""),
+                "raw_feedback": new_feedback,
                 "evaluated_at": datetime.utcnow().isoformat(),
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
