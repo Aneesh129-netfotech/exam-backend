@@ -136,8 +136,10 @@ def submit_test():
             }
 
             # Append feedback for violations only
-            violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
-            new_feedback = (row.get("raw_feedback") or "") + (f"\n[VIOLATION] {violation_log}" if violation_log else "")
+            new_feedback = row.get("raw_feedback") or "" 
+            for col, val in non_zero_violations.items():
+                for _ in range(val):
+                    new_feedback += f"\n[VIOLATION] {col}: +1"
 
             # Update scores
             update_data = {
