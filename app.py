@@ -131,7 +131,7 @@ def submit_test():
 
             # Merge violations
             merged_violations = {
-                col: non_zero_violations.get(col, row.get(col, 0))
+                col: violations.get(col, row.get(col, 0))
                 for col in VALID_COLUMNS
             }
 
