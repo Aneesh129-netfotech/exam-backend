@@ -130,7 +130,10 @@ def submit_test():
             row = res.data[0]
 
             # Merge violations
-            merged_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            # Merge violations with existing row (if any)
+            merged_violations = {}
+            for col in VALID_COLUMNS:
+                merged_violations[col] = row.get(col, 0) + data.get(col, 0)
 
             # Append feedback for violations only
             violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
