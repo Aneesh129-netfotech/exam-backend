@@ -126,8 +126,10 @@ def submit_test():
             .execute()
 
         if res.data:
-            # Update existing row
             row = res.data[0]
+
+            # Start with old feedback
+            new_feedback = row.get("raw_feedback", "")
 
             # Merge violations
             merged_violations = {
@@ -135,13 +137,11 @@ def submit_test():
                 for col in VALID_COLUMNS
             }
 
-            # Append feedback for violations only
-            new_feedback = row.get("raw_feedback") or "" 
-            for col, val in non_zero_violations.items():
-                for _ in range(val):
-                    line = f"[VIOLATION] {col}: +1"
-                    new_feedback += f"\n{line}"
-                    print(line)  # keep console and Supabase identical 
+            # Append feedback in summary form
+            if non_zero_violations:
+                summary = ", ".join([f"{col}={val}" for col, val in non_zero_violations.items()])
+                new_feedback += f"\n[VIOLATIONS] {summary}"
+                print(f"[VIOLATIONS] {summary}")
 
             # Update scores
             update_data = {
@@ -160,11 +160,11 @@ def submit_test():
         else:
             # Create a new row if it doesn't exist
             new_feedback = data.get("raw_feedback", "")
-            for col, val in non_zero_violations.items():
-                for _ in range(val):
-                    line = f"[VIOLATION] {col}: +1"
-                    new_feedback += f"\n{line}"
-                    print(line)  # keep console identical to Supabase
+            # Append feedback in summary form
+            if non_zero_violations:
+                summary = ", ".join([f"{col}={val}" for col, val in non_zero_violations.items()])
+                new_feedback += f"\n[VIOLATIONS] {summary}"
+                print(f"[VIOLATIONS] {summary}")  # console + Supabase identical
 
             payload = {
                 "id": str(uuid.uuid4()),
