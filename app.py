@@ -199,9 +199,9 @@ def insert_manual_violations():
         data = request.get_json()
         print(f"📥 Manual violation insert request: {data}")
         
-        violations_data = data.get("violations", {})
-        violations = {col: violations_data.get(col, 0) for col in VALID_COLUMNS}
-
+        # Extract individual violation counts
+        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+        
         # Prepare the record
         params = {
             "id": str(uuid.uuid4()),
