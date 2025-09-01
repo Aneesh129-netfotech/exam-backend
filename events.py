@@ -83,7 +83,7 @@ def register_socket_events(socketio: SocketIO):
                 new_feedback = row.get("raw_feedback", "")
 
                 # Update numeric counts
-                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
+                numeric_updates = increments  # ✅ console values direct overwrite 
 
                 # Append feedback in summary form
                 if increments:
