@@ -77,15 +77,19 @@ def register_socket_events(socketio: SocketIO):
                 .execute()
 
             if res.data:
-                # Update existing row
                 row = res.data[0]
+
+                # Start with old feedback
+                new_feedback = row.get("raw_feedback", "")
+
+                # Update numeric counts
                 numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in increments}
 
-                # Append feedback
-                new_feedback = row.get("raw_feedback") or "" 
-                for col, inc in increments.items():
-                    for _ in range(inc):
-                        new_feedback += f"\n[VIOLATION] {col}: +1"
+                # Append feedback in summary form
+                if increments:
+                    summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
+                    new_feedback += f"\n[VIOLATIONS] {summary}"
+                    print(f"[VIOLATIONS] {summary}")
 
                 supabase.table("test_results").update({
                     **numeric_updates,
@@ -98,11 +102,11 @@ def register_socket_events(socketio: SocketIO):
             else:
                 # Create new row
                 new_feedback = ""
-                for col, inc in increments.items():
-                    for _ in range(inc):
-                        line = f"[VIOLATION] {col}: +1"
-                        new_feedback += f"\n{line}"
-                        print(line)  # console log identical to Supabase
+                # Append feedback in summary form
+                if increments:
+                    summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
+                    new_feedback += f"\n[VIOLATIONS] {summary}"
+                    print(f"[VIOLATIONS] {summary}")  # console + Supabase identical
 
                 payload = {
                     "id": str(uuid.uuid4()),
