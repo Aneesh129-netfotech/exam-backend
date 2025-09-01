@@ -139,15 +139,18 @@ def submit_test():
             violation_log = ", ".join([f"{k}: +{v}" for k, v in non_zero_violations.items()])
             new_feedback = (row.get("raw_feedback") or "") + (f"\n[VIOLATION] {violation_log}" if violation_log else "")
 
+            # Extract absolute violation counts from request
+            clean_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+
             # Update scores
             update_data = {
+                **clean_violations,
                 "score": data.get("score", row.get("score", 0)),
                 "max_score": data.get("max_score", row.get("max_score", 0)),
                 "percentage": data.get("percentage", row.get("percentage", 0.0)),
                 "total_questions": data.get("total_questions", row.get("total_questions", 0)),
                 "raw_feedback": new_feedback,
-                "updated_at": datetime.utcnow().isoformat(),
-                **merged_violations
+                "updated_at": datetime.utcnow().isoformat()
             }
 
             supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
