@@ -132,7 +132,10 @@ def submit_test():
             new_feedback = row.get("raw_feedback", "")
 
             # Merge violations
-            merged_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}  # ✅ always take frontend (console) values as truth 
+            merged_violations = {
+                col: row.get(col, 0) + data.get(col, 0)
+                for col in VALID_COLUMNS
+            }
 
             # Append feedback in summary form
             if non_zero_violations:
