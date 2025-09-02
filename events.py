@@ -82,8 +82,11 @@ def register_socket_events(socketio: SocketIO):
                 # Start with old feedback
                 new_feedback = row.get("raw_feedback", "")
 
-                # Update numeric counts
-                numeric_updates = {col: data.get(col, row.get(col, 0)) for col in VALID_COLUMNS}
+                # Update numeric counts (accumulate instead of overwrite)
+                numeric_updates = {
+                    col: row.get(col, 0) + data.get(col, 0)
+                    for col in VALID_COLUMNS
+                }
 
                 # Append feedback in summary form
                 if increments:
