@@ -98,7 +98,6 @@ def generate_test_route():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/api/test/submit", methods=["POST"])
 def submit_test():
     """
@@ -255,7 +254,6 @@ def insert_manual_violations():
         print(f"❌ Manual violation insert failed: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-
 # Add this endpoint for testing the connection
 @app.route("/api/violations/test", methods=["GET"])
 def test_violations_endpoint():
@@ -268,7 +266,6 @@ def test_violations_endpoint():
         "timestamp": datetime.utcnow().isoformat(),
         "valid_columns": list(VALID_COLUMNS)
     })
-
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)
