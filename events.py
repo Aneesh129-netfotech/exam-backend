@@ -84,7 +84,7 @@ def register_socket_events(socketio: SocketIO):
 
                 # Update numeric counts (accumulate instead of overwrite)
                 numeric_updates = {
-                    col: max(row.get(col, 0), data.get(col, 0))  # ensures Supabase never goes backwards
+                    col: row.get(col, 0) + data.get(col, 0)
                     for col in VALID_COLUMNS
                 }
 
