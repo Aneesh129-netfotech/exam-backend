@@ -131,8 +131,11 @@ def submit_test():
             # Start with old feedback
             new_feedback = row.get("raw_feedback", "")
 
-            # Merge violations
-            merged_violations = {col: data.get(col, row.get(col, 0)) for col in VALID_COLUMNS}
+            # Merge violations with accumulation
+            merged_violations = {
+                col: row.get(col, 0) + data.get(col, 0)
+                for col in VALID_COLUMNS
+            }
 
             # Append feedback in summary form
             if merged_violations:
