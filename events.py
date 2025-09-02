@@ -19,23 +19,16 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 VALID_COLUMNS = {
     "tab_switches",
     "inactivities",
-    "text_selections",
-    "copies",
-    "pastes",
-    "right_clicks",
     "face_not_visible",
+    "screenshot",
 }
 
 LEGACY_MAP = {
     "tab_switch": "tab_switches",
     "inactivity": "inactivities",
-    "text_selection": "text_selections",
-    "copy": "copies",
-    "paste": "pastes",
-    "right_click": "right_clicks",
     "face_not_visible": "face_not_visible",
+    "screenshot": "screenshot",
 }
-
 
 def normalize_violations(data: dict) -> dict:
     # Return only individual violation counts, ignore totals
