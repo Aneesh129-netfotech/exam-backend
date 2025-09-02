@@ -133,7 +133,7 @@ def submit_test():
 
             # Merge violations with accumulation
             merged_violations = {
-                col: row.get(col, 0) + data.get(col, 0)
+                col: max(row.get(col, 0), data.get(col, 0))  # ensures Supabase never goes backwards
                 for col in VALID_COLUMNS
             }
 
