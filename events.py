@@ -1,8 +1,8 @@
-# events.py 
-from flask_socketio import SocketIO 
+# events.py
+from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
-import os 
+import os
 from datetime import datetime
 import uuid
 
@@ -10,6 +10,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Supabase credentials not found! Make sure .env has SUPABASE_URL and SUPABASE_KEY.")
 
@@ -35,17 +36,21 @@ LEGACY_MAP = {
     "face_not_visible": "face_not_visible",
 }
 
+
 def normalize_violations(data: dict) -> dict:
     # Return only individual violation counts, ignore totals
     return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
-def register_socket_events(socketio: SocketIO):    
+
+def register_socket_events(socketio: SocketIO):
     @socketio.on("connect")
     def handle_connect():
         print("✅ Client connected")
+
     @socketio.on("disconnect")
     def handle_disconnect():
         print("❌ Client disconnected")
+
     @socketio.on("suspicious_event")
     def handle_suspicious_event(data):
         try:
@@ -55,10 +60,15 @@ def register_socket_events(socketio: SocketIO):
 
             if not question_set_id or not candidate_email:
                 print("⚠️ Missing question_set_id or candidate_email")
-                return# Only valid columns (latest snapshot, not just increments)            
-            latest_totals = {col: data.get(col, 0) for col in VALID_COLUMNS}
-            if not any(latest_totals.values()):
-                return  # nothing to save# Find existing row            
+                return
+
+            # Only valid columns
+            increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
+            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
+            if not increments:
+                return  # nothing to update
+
+            # Find existing row
             res = supabase.table("test_results") \
                 .select("*") \
                 .eq("question_set_id", question_set_id) \
@@ -69,20 +79,37 @@ def register_socket_events(socketio: SocketIO):
             if res.data:
                 row = res.data[0]
 
-                # Build new feedback string with latest totals                
-                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in latest_totals.items()])
+                # Start with old feedback
+                new_feedback = row.get("raw_feedback", "")
+
+                # Update numeric counts (accumulate instead of overwrite)
+                numeric_updates = {
+                    col: row.get(col, 0) + data.get(col, 0)
+                    for col in VALID_COLUMNS
+                }
+
+                # Append feedback in summary form
+                if increments:
+                    summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
+                    new_feedback = f"Total Violations: {', '.join([f'{col}={val}' for col,val in numeric_updates.items()])}"
+                    print(f"[VIOLATIONS] {summary}")
 
                 supabase.table("test_results").update({
-                    **latest_totals,  # overwrite with latest numbers
+                    **numeric_updates,
                     "raw_feedback": new_feedback,
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("id", row["id"]).execute()
 
-                payload = {**row, **latest_totals, "raw_feedback": new_feedback}
+                payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
 
             else:
-                # Create new row with latest totals                
-                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in latest_totals.items()])
+                # Create new row
+                new_feedback = ""
+                # Append feedback in summary form
+                if increments:
+                    summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
+                    new_feedback += f"\n[VIOLATIONS] {summary}"
+                    print(f"[VIOLATIONS] {summary}")  # console + Supabase identical
 
                 payload = {
                     "id": str(uuid.uuid4()),
@@ -98,18 +125,18 @@ def register_socket_events(socketio: SocketIO):
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
-                    **latest_totals
+                    **increments
                 }
                 supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
 
-            # Always broadcast update to frontend            
+            # Always broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
-                **latest_totals,
+                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
-            print(f"✅ Latest violation totals saved for {candidate_email} in set {question_set_id}: {latest_totals}")
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
 
         except Exception as e:
-            print(f"❌ Failed to upsert violation totals: {e}")
+            print(f"❌ Failed to upsert violation batch: {e}")
