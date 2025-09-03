@@ -19,13 +19,16 @@ VALID_COLUMNS = {
     "tab_switches",
     "inactivities",
     "face_not_visible",
+    "screenshot"
 }
 
 LEGACY_MAP = {
     "tab_switch": "tab_switches",
     "inactivity": "inactivities",
     "face_not_visible": "face_not_visible",
+    "screenshot": "screenshot",
 }
+
 def normalize_violations(data: dict) -> dict:
     # Return only violation counts
     return {col: data.get(col, 0) for col in VALID_COLUMNS}
