@@ -70,10 +70,9 @@ def register_socket_events(socketio: SocketIO):
             if res.data:
                 row = res.data[0]
 
-                # Overwrite with latest totals from frontend
+                # Keep old scores    
                 numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
 
-                # Update feedback
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
                 print(f"[VIOLATIONS] {new_feedback}")
 
@@ -84,9 +83,8 @@ def register_socket_events(socketio: SocketIO):
                 }).eq("id", row["id"]).execute()
 
                 payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
-
             else:
-                # Create new row if not exist
+                # 🚀 NEW FIX: don't overwrite scores with 0    
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
@@ -94,15 +92,12 @@ def register_socket_events(socketio: SocketIO):
                     "candidate_name": candidate_name,
                     "candidate_email": candidate_email,
                     "status": "Pending",
-                    "score": 0,
-                    "max_score": 0,
-                    "percentage": 0.0,
-                    "total_questions": 0,
                     "raw_feedback": new_feedback,
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": datetime.utcnow().isoformat(),
                     **increments
+                    # 🚀 removed score=0, max_score=0, percentage=0.0, total_questions=0    
                 }
                 supabase.table("test_results").insert(payload).execute()
 
