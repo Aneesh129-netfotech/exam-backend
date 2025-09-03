@@ -126,7 +126,7 @@ def submit_test():
                 if given == correct:
                     score += 1
 
-        percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0# ====== 🔹 Violations ======        
+        percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0       
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
