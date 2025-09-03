@@ -70,8 +70,8 @@ def register_socket_events(socketio: SocketIO):
             if res.data:
                 row = res.data[0]
 
-                # Accumulate numeric counts from frontend
-                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
+                # Overwrite with latest totals from frontend
+                numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
 
                 # Update feedback
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
