@@ -1,4 +1,4 @@
-# events.py
+# events.py 
 from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
@@ -10,12 +10,11 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Supabase credentials not found! Make sure .env has SUPABASE_URL and SUPABASE_KEY.")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
+# Violation fields only
 VALID_COLUMNS = {
     "tab_switches",
     "inactivities",
@@ -27,21 +26,17 @@ LEGACY_MAP = {
     "inactivity": "inactivities",
     "face_not_visible": "face_not_visible",
 }
-
 def normalize_violations(data: dict) -> dict:
-    # Return only individual violation counts, ignore totals
+    # Return only violation counts
     return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
-
-def register_socket_events(socketio: SocketIO):
+def register_socket_events(socketio: SocketIO):    
     @socketio.on("connect")
     def handle_connect():
         print("✅ Client connected")
-
     @socketio.on("disconnect")
     def handle_disconnect():
         print("❌ Client disconnected")
-
     @socketio.on("suspicious_event")
     def handle_suspicious_event(data):
         try:
@@ -51,15 +46,11 @@ def register_socket_events(socketio: SocketIO):
 
             if not question_set_id or not candidate_email:
                 print("⚠️ Missing question_set_id or candidate_email")
-                return
-
-            # Only counts sent by frontend
+                return# Only counts sent by frontend            
             increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
             increments = {k: v for k, v in increments.items() if v > 0}
             if not increments:
-                return
-
-            # Find existing row
+                return# Find existing row            
             res = supabase.table("test_results") \
                 .select("*") \
                 .eq("question_set_id", question_set_id) \
@@ -70,38 +61,39 @@ def register_socket_events(socketio: SocketIO):
             if res.data:
                 row = res.data[0]
 
-                # Keep old scores    
+                # Overwrite with latest totals from frontend                
                 numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
 
+                # Update feedback summary (violations only)                
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
                 print(f"[VIOLATIONS] {new_feedback}")
 
                 supabase.table("test_results").update({
                     **numeric_updates,
                     "raw_feedback": new_feedback,
-                    "updated_at": datetime.utcnow().isoformat()
+                    "updated_at": datetime.utcnow().isoformat(),
                 }).eq("id", row["id"]).execute()
 
                 payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
+
             else:
-                # 🚀 NEW FIX: don't overwrite scores with 0    
+                # 🚀 Create a row only with violations, no score fields                
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
                     "question_set_id": question_set_id,
                     "candidate_name": candidate_name,
                     "candidate_email": candidate_email,
-                    "status": "Pending",
+                    "status": "In Progress",   # 👈 mark as ongoing until submission
                     "raw_feedback": new_feedback,
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat(),
-                    "evaluated_at": datetime.utcnow().isoformat(),
+                    "evaluated_at": None,      # 👈 will be set on submit                    
                     **increments
-                    # 🚀 removed score=0, max_score=0, percentage=0.0, total_questions=0    
                 }
                 supabase.table("test_results").insert(payload).execute()
 
-            # Broadcast update
+            # Broadcast update            
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
