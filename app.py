@@ -120,11 +120,12 @@ def submit_test():
         total_questions = len(questions)
 
         if questions and answers:
-            for idx, q in enumerate(questions):
-                correct = q.get("correct_answer")
+            for idx, q in enumerate(questions):     
+                correct = q.get("answer") or q.get("correct_answer")
                 given = answers[idx] if idx < len(answers) else None
                 if given == correct:
                     score += 1
+
         percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0# ====== 🔹 Violations ======        
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
