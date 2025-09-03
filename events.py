@@ -53,11 +53,11 @@ def register_socket_events(socketio: SocketIO):
                 print("⚠️ Missing question_set_id or candidate_email")
                 return
 
-            # Only valid columns
+            # Only counts sent by frontend
             increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
-            increments = {k: v for k, v in increments.items() if v > 0}  # skip zeros
+            increments = {k: v for k, v in increments.items() if v > 0}
             if not increments:
-                return  # nothing to update
+                return
 
             # Find existing row
             res = supabase.table("test_results") \
@@ -70,20 +70,12 @@ def register_socket_events(socketio: SocketIO):
             if res.data:
                 row = res.data[0]
 
-                # Start with old feedback
-                new_feedback = row.get("raw_feedback", "")
+                # Accumulate numeric counts from frontend
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
 
-                # Update numeric counts (accumulate instead of overwrite)
-                numeric_updates = {
-                    col: row.get(col, 0) + data.get(col, 0)
-                    for col in VALID_COLUMNS
-                }
-
-                # Append feedback in summary form
-                if increments:
-                    summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
-                    new_feedback = f"Total Violations: {', '.join([f'{col}={val}' for col,val in numeric_updates.items()])}"
-                    print(f"[VIOLATIONS] {summary}")
+                # Update feedback
+                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
+                print(f"[VIOLATIONS] {new_feedback}")
 
                 supabase.table("test_results").update({
                     **numeric_updates,
@@ -94,14 +86,8 @@ def register_socket_events(socketio: SocketIO):
                 payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
 
             else:
-                # Create new row
-                new_feedback = ""
-                # Append feedback in summary form
-                if increments:
-                    summary = ", ".join([f"{col}={val}" for col, val in increments.items()])
-                    new_feedback += f"\n[VIOLATIONS] {summary}"
-                    print(f"[VIOLATIONS] {summary}")  # console + Supabase identical
-
+                # Create new row if not exist
+                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in increments.items()])
                 payload = {
                     "id": str(uuid.uuid4()),
                     "question_set_id": question_set_id,
@@ -118,9 +104,9 @@ def register_socket_events(socketio: SocketIO):
                     "evaluated_at": datetime.utcnow().isoformat(),
                     **increments
                 }
-                supabase.table("test_results").upsert(payload, on_conflict=["candidate_email", "question_set_id"]).execute()
+                supabase.table("test_results").insert(payload).execute()
 
-            # Always broadcast update
+            # Broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
