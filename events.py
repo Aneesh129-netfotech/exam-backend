@@ -72,6 +72,10 @@ def register_socket_events(socketio: SocketIO):
                     **numeric_updates,
                     "raw_feedback": new_feedback,
                     "updated_at": datetime.utcnow().isoformat(),
+                    "score": row.get("score", 0),
+                    "max_score": row.get("max_score", 0),
+                    "percentage": row.get("percentage", 0.0),
+                    "total_questions": row.get("total_questions", 0),
                 }).eq("id", row["id"]).execute()
 
                 payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
