@@ -102,40 +102,34 @@ def generate_test_route():
 def submit_test():
     """
     Upsert candidate test results + violations into a single row.
-    Automatically calculates score, max_score, percentage, total_questions from raw_feedback if not provided.
+    Automatically calculates score, max_score, percentage, total_questions
+    based on submitted answers and questions.
     """
     try:
         data = request.get_json()
         question_set_id = data.get("question_set_id")
         candidate_email = data.get("candidate_email")
- 
+
         if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
- 
-        # Parse scores from raw_feedback if available
-        raw_feedback = data.get("raw_feedback", "")
-        score = data.get("score")
-        max_score = data.get("max_score")
-        percentage = data.get("percentage")
-        total_questions = data.get("total_questions")
- 
-        if raw_feedback:
-            import re
-            # Match things like "Score: 10/10"
-            matches = re.findall(r"Score:\s*(\d+)/(\d+)", raw_feedback)
-            if matches:
-                obtained_scores = [int(m[0]) for m in matches]
-                possible_scores = [int(m[1]) for m in matches]
-                score = sum(obtained_scores)
-                max_score = sum(possible_scores)
-                total_questions = len(matches)
-                percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0
- 
-        # Only non-zero violation columns
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400# ====== 🔹 Auto-calculate score ======        
+        answers = data.get("answers", [])
+        questions = data.get("questions", [])
+
+        score = 0        
+        max_score = len(questions)
+        total_questions = len(questions)
+
+        if questions and answers:
+            for idx, q in enumerate(questions):
+                correct = q.get("correct_answer")
+                given = answers[idx] if idx < len(answers) else None
+                if given == correct:
+                    score += 1
+        percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0# ====== 🔹 Violations ======        
         violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
- 
-        # Check if a record already exists
+
+        # ====== 🔹 Check if record exists ======        
         res = supabase.table("test_results") \
             .select("*") \
             .eq("question_set_id", question_set_id) \
@@ -143,73 +137,74 @@ def submit_test():
             .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
- 
+
         if res.data:
             row = res.data[0]
- 
-            # Merge violations
-            merged_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
- 
-            # Update feedback summary
-            new_feedback = raw_feedback
-            if merged_violations:
-                new_feedback += "\n[VIOLATIONS] " + ", ".join([f"{col}={val}" for col, val in merged_violations.items()])
- 
+
+            # Update feedback            
+            feedback = f"Score: {score}/{max_score}"
+            if non_zero_violations:
+                feedback += "\n[VIOLATIONS] " + ", ".join([f"{k}={v}" for k, v in non_zero_violations.items()])
+
             update_data = {
-                "score": score or row.get("score", 0),
-                "max_score": max_score or row.get("max_score", 0),
-                "percentage": percentage or row.get("percentage", 0.0),
-                "total_questions": total_questions or row.get("total_questions", 0),
-                "raw_feedback": new_feedback,
+                "score": score,
+                "max_score": max_score,
+                "percentage": percentage,
+                "total_questions": total_questions,
+                "status": "Pass" if percentage >= 50 else "Fail",
+                "raw_feedback": feedback,
+                "evaluated_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
-                **merged_violations
+                "duration_used_seconds": data.get("duration_used", 0),
+                "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
+                **violations
             }
- 
+
             supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
             payload = {**row, **update_data}
- 
+
         else:
-            # Create new row if it doesn't exist
-            new_feedback = raw_feedback
+            # New row            
+            feedback = f"Score: {score}/{max_score}"
             if non_zero_violations:
-                new_feedback += f"\n[VIOLATIONS] {', '.join([f'{col}={val}' for col, val in non_zero_violations.items()])}"
- 
+                feedback += "\n[VIOLATIONS] " + ", ".join([f"{k}={v}" for k, v in non_zero_violations.items()])
+
             payload = {
                 "id": str(uuid.uuid4()),
                 "exam_id": data.get("exam_id"),
                 "question_set_id": question_set_id,
                 "candidate_name": data.get("candidate_name"),
                 "candidate_email": candidate_email,
-                "status": data.get("status", "Pending"),
-                "score": score or 0,
-                "max_score": max_score or 0,
-                "percentage": percentage or 0.0,
-                "total_questions": total_questions or 0,
-                "raw_feedback": new_feedback,
+                "candidate_id": data.get("candidate_id"),
+                "status": "Pass" if percentage >= 50 else "Fail",
+                "score": score,
+                "max_score": max_score,
+                "percentage": percentage,
+                "total_questions": total_questions,
+                "raw_feedback": feedback,
                 "evaluated_at": datetime.utcnow().isoformat(),
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
                 "duration_used_seconds": data.get("duration_used", 0),
                 "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
-                "candidate_id": data.get("candidate_id"),
-                **non_zero_violations
+                **violations
             }
             supabase.table("test_results").insert(payload).execute()
- 
-        # Emit update to frontend
+
+        # 🔹 Notify frontend        
         socketio.emit("violation_update", {
             "candidate_email": candidate_email,
             "question_set_id": question_set_id,
             **{col: payload.get(col, 0) for col in VALID_COLUMNS},
         })
- 
+
         return jsonify({
             "status": "success",
             "saved": payload
         })
- 
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500 
 
 @app.route("/api/violations/manual", methods=["POST"])
 def insert_manual_violations():
