@@ -67,7 +67,7 @@ def register_socket_events(socketio: SocketIO):
                 .limit(1) \
                 .execute()
 
-            ''' if res.data:
+            if res.data:
                 row = res.data[0]
 
                 # Overwrite with latest totals from frontend
@@ -104,16 +104,16 @@ def register_socket_events(socketio: SocketIO):
                     "evaluated_at": datetime.utcnow().isoformat(),
                     **increments
                 }
-                supabase.table("test_results").insert(payload).execute() '''
+                supabase.table("test_results").insert(payload).execute()
 
             # Broadcast update
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
-                **increments,
+                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
             })
 
-            print(f"📡 Violation event (not saved to DB): {increments}")
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
 
         except Exception as e:
             print(f"❌ Failed to upsert violation batch: {e}")
