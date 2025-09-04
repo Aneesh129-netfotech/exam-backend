@@ -45,69 +45,28 @@ def register_socket_events(socketio: SocketIO):
         try:
             question_set_id = data.get("question_set_id")
             candidate_email = data.get("candidate_email")
-            candidate_name = data.get("candidate_name", "Unknown")
 
             if not question_set_id or not candidate_email:
                 print("⚠️ Missing question_set_id or candidate_email")
-                return# Only counts sent by frontend            
+                return
+
+            # Only counts sent by frontend
             increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
             increments = {k: v for k, v in increments.items() if v > 0}
             if not increments:
-                return# Find existing row            
-            res = supabase.table("test_results") \
-                .select("*") \
-                .eq("question_set_id", question_set_id) \
-                .eq("candidate_email", candidate_email) \
-                .limit(1) \
-                .execute()
+                return
 
-            if res.data:
-                row = res.data[0]
+            # ❌ REMOVE this whole block (Supabase fetch + update/insert)
+            # res = supabase.table("test_results")...
 
-                # Overwrite with latest totals from frontend                
-                numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
-
-                # Update feedback summary (violations only)                
-                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
-                print(f"[VIOLATIONS] {new_feedback}")
-
-                supabase.table("test_results").update({
-                    **numeric_updates,
-                    "raw_feedback": new_feedback,
-                    "updated_at": datetime.utcnow().isoformat(),
-                    "score": row.get("score", 0),
-                    "max_score": row.get("max_score", 0),
-                    "percentage": row.get("percentage", 0.0),
-                    "total_questions": row.get("total_questions", 0),
-                }).eq("id", row["id"]).execute()
-
-                payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
-
-            else:
-                # 🚀 Create a row only with violations, no score fields                
-                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in increments.items()])
-                payload = {
-                    "id": str(uuid.uuid4()),
-                    "question_set_id": question_set_id,
-                    "candidate_name": candidate_name,
-                    "candidate_email": candidate_email,
-                    "status": "In Progress",   # 👈 mark as ongoing until submission
-                    "raw_feedback": new_feedback,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "updated_at": datetime.utcnow().isoformat(),
-                    "evaluated_at": None,      # 👈 will be set on submit                    
-                    **increments
-                }
-                supabase.table("test_results").insert(payload).execute()
-
-            # Broadcast update            
+            # ✅ Instead, just broadcast to frontend
             socketio.emit("violation_update", {
                 "candidate_email": candidate_email,
                 "question_set_id": question_set_id,
-                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
+                **increments
             })
 
-            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
+            print(f"📡 Violation batch broadcast for {candidate_email} in set {question_set_id}: {increments}")
 
         except Exception as e:
-            print(f"❌ Failed to upsert violation batch: {e}")
+            print(f"❌ Failed to handle violation event: {e}")
