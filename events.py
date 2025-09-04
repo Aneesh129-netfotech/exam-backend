@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 import uuid
-
+ 
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -112,3 +112,4 @@ def register_socket_events(socketio: SocketIO):
 
         except Exception as e:
             print(f"❌ Failed to upsert violation batch: {e}")
+
