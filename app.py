@@ -153,15 +153,14 @@ def submit_test():
             row = res.data[0]
             violations = {}
             for col in VALID_COLUMNS:
-                if incoming_violations[col] is not None:
-                    # add incoming count
-                    violations[col] = row.get(col, 0) + incoming_violations[col]
+                # If frontend sent >0, add it. If missing, keep DB value.
+                if data.get(col) is not None:
+                    violations[col] = row.get(col, 0) + int(data[col])
                 else:
-                    # keep old value
                     violations[col] = row.get(col, 0)
         else:
-            violations = {col: incoming_violations[col] or 0 for col in VALID_COLUMNS}
-            
+            violations = {col: int(data.get(col, 0)) for col in VALID_COLUMNS}
+
         print("Merged violations (final before save):", violations)
 
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
@@ -233,7 +232,7 @@ def submit_test():
             },
         )
 
-        return jsonify({"status": "success", "saved": payload})
+        return jsonify({"status": "success", "saved": payload, "violations": violations})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
