@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -34,6 +35,7 @@ register_socket_events(socketio)
 @app.route("/")
 def index():
     return jsonify({"status": "Server is running."})
+
 
 @app.route("/api/exam/<candidate_id>", methods=["GET"])
 def get_exam_for_candidate(candidate_id):
@@ -125,10 +127,7 @@ def submit_test():
                     score += 1
 
         percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0       
-        violations = {}
-        for col in VALID_COLUMNS:
-            if col in data:  # only include if client sent it
-                violations[col] = int(data[col])
+        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
         # ====== 🔹 Check if record exists ======        
@@ -136,6 +135,7 @@ def submit_test():
             .select("*") \
             .eq("question_set_id", question_set_id) \
             .eq("candidate_email", candidate_email) \
+            .eq("exam_id", data.get("exam_id")) \
             .limit(1) \
             .execute()
 
@@ -158,13 +158,8 @@ def submit_test():
                 "updated_at": datetime.utcnow().isoformat(),
                 "duration_used_seconds": data.get("duration_used", 0),
                 "duration_used_minutes": round((data.get("duration_used", 0)) / 60, 2),
+                **violations
             }
-
-            # 🔹 accumulate violations
-            for col in VALID_COLUMNS:
-                old_val = row.get(col, 0) or 0
-                new_val = violations.get(col, 0) or 0
-                update_data[col] = old_val + new_val
 
             supabase.table("test_results").update(update_data).eq("id", row["id"]).execute()
             payload = {**row, **update_data}
@@ -177,6 +172,7 @@ def submit_test():
 
             payload = {
                 "id": str(uuid.uuid4()),
+                "exam_id": data.get("exam_id"),
                 "question_set_id": question_set_id,
                 "candidate_name": data.get("candidate_name"),
                 "candidate_email": candidate_email,
