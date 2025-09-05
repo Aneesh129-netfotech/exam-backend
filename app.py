@@ -144,17 +144,20 @@ def submit_test():
             .execute()
         )
 
-        incoming_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+        incoming_violations = {col: data.get(col) for col in VALID_COLUMNS}
 
         if res.data:
             row = res.data[0]
-            # ✅ accumulate violations instead of overwrite
-            violations = {
-                col: row.get(col, 0) + incoming_violations.get(col, 0)
-                for col in VALID_COLUMNS
-            }
+            violations = {}
+            for col in VALID_COLUMNS:
+                if incoming_violations[col] is not None:
+                    # add incoming count
+                    violations[col] = row.get(col, 0) + incoming_violations[col]
+                else:
+                    # keep old value
+                    violations[col] = row.get(col, 0)
         else:
-            violations = incoming_violations
+            violations = {col: incoming_violations[col] or 0 for col in VALID_COLUMNS}
 
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
