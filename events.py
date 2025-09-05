@@ -42,6 +42,7 @@ def register_socket_events(socketio: SocketIO):
         print("❌ Client disconnected")
     @socketio.on("suspicious_event")
     def handle_suspicious_event(data):
+        print("📥 suspicious_event received:", data)
         try:
             question_set_id = data.get("question_set_id")
             candidate_email = data.get("candidate_email")
@@ -65,7 +66,7 @@ def register_socket_events(socketio: SocketIO):
                 row = res.data[0]
 
                 # Overwrite with latest totals from frontend                
-                numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
+                numeric_updates = {col: int(increments.get(col, row.get(col, 0))) for col in VALID_COLUMNS}
 
                 # Update feedback summary (violations only)                
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
