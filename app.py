@@ -146,6 +146,9 @@ def submit_test():
 
         incoming_violations = {col: data.get(col) for col in VALID_COLUMNS}
 
+        print("Incoming violations:", incoming_violations)
+        print("Row before merge:", res.data[0] if res.data else "None")
+
         if res.data:
             row = res.data[0]
             violations = {}
