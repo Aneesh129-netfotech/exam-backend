@@ -30,41 +30,87 @@ def normalize_violations(data: dict) -> dict:
     # Return only violation counts
     return {col: data.get(col, 0) for col in VALID_COLUMNS}
 
-def register_socket_events(socketio: SocketIO):
+def register_socket_events(socketio: SocketIO):    
     @socketio.on("connect")
     def handle_connect():
         print("✅ Client connected")
-
     @socketio.on("disconnect")
     def handle_disconnect():
         print("❌ Client disconnected")
-
     @socketio.on("suspicious_event")
     def handle_suspicious_event(data):
-        """
-        Only broadcast violations live; DO NOT insert/update DB.
-        """
-        candidate_email = data.get("candidate_email")
-        question_set_id = data.get("question_set_id")
-        candidate_name = data.get("candidate_name", "Unknown")
+        print("📥 suspicious_event received:", data)
+        try:
+            question_set_id = data.get("question_set_id")
+            candidate_email = data.get("candidate_email")
+            candidate_name = data.get("candidate_name", "Unknown")
 
-        if not candidate_email or not question_set_id:
-            print("⚠️ Missing candidate_email or question_set_id")
-            return
+            if not question_set_id or not candidate_email:
+                print("⚠️ Missing question_set_id or candidate_email")
+                return
 
-        # Convert all violation counts to integers
-        increments = {col: int(data.get(col, 0) or 0) for col in VALID_COLUMNS}
+            # 🔹 Convert all violation counts to integers
+            increments = {col: int(data.get(col, 0) or 0) for col in VALID_COLUMNS}
 
-        # Skip if all counts are zero
-        if all(v == 0 for v in increments.values()):
-            print("ℹ️ No violation counts to broadcast")
-            return
+            # 🔹 Skip if all counts are zero
+            if all(v == 0 for v in increments.values()):
+                print("ℹ️ No violation counts to update")
+                return
 
-        # Broadcast live violations only
-        socketio.emit("violation_update", {
-            "candidate_email": candidate_email,
-            "question_set_id": question_set_id,
-            **increments
-        })
+            # 🔹 Check for existing row
+            res = supabase.table("test_results") \
+                .select("*") \
+                .eq("question_set_id", question_set_id) \
+                .eq("candidate_email", candidate_email) \
+                .limit(1) \
+                .execute()
 
-        print(f"ℹ️ Broadcasted violations for {candidate_email} in set {question_set_id}: {increments}")
+            if res.data:
+                row = res.data[0]
+
+                # 🔹 Accumulate violation counts
+                numeric_updates = {col: row.get(col, 0) + increments.get(col, 0) for col in VALID_COLUMNS}
+
+                # 🔹 Update feedback
+                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
+
+                supabase.table("test_results").update({
+                    **numeric_updates,
+                    "raw_feedback": new_feedback,
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "score": row.get("score", 0),
+                    "max_score": row.get("max_score", 0),
+                    "percentage": row.get("percentage", 0.0),
+                    "total_questions": row.get("total_questions", 0),
+                }).eq("id", row["id"]).execute()
+
+                payload = {**row, **numeric_updates, "raw_feedback": new_feedback}
+
+            else:
+                # 🚀 Create a new row if none exists
+                new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in increments.items()])
+                payload = {
+                    "id": str(uuid.uuid4()),
+                    "question_set_id": question_set_id,
+                    "candidate_name": candidate_name,
+                    "candidate_email": candidate_email,
+                    "status": "Pending",
+                    "raw_feedback": new_feedback,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "evaluated_at": None,
+                    **increments
+                }
+                supabase.table("test_results").insert(payload).execute()
+
+            # 🔹 Broadcast the updated violations to frontend
+            socketio.emit("violation_update", {
+                "candidate_email": candidate_email,
+                "question_set_id": question_set_id,
+                **{col: payload.get(col, 0) for col in VALID_COLUMNS},
+            })
+
+            print(f"✅ Violation batch saved for {candidate_email} in set {question_set_id}: {increments}")
+
+        except Exception as e:
+            print(f"❌ Failed to upsert violation batch: {e}")
