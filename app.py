@@ -127,7 +127,10 @@ def submit_test():
                     score += 1
 
         percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0       
-        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+        violations = {}
+        for col in VALID_COLUMNS:
+            if col in data:  # only include if client sent it
+                violations[col] = int(data[col])
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
         # ====== 🔹 Check if record exists ======        
