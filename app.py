@@ -144,7 +144,7 @@ def submit_test():
             .execute()
         )
 
-        incoming_violations = {col: data.get(col) for col in VALID_COLUMNS}
+        incoming_violations = {col: int(data.get(col) or 0) for col in VALID_COLUMNS}
 
         print("Incoming violations:", incoming_violations)
         print("Row before merge:", res.data[0] if res.data else "None")
@@ -161,6 +161,8 @@ def submit_test():
                     violations[col] = row.get(col, 0)
         else:
             violations = {col: incoming_violations[col] or 0 for col in VALID_COLUMNS}
+            
+        print("Merged violations (final before save):", violations)
 
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
