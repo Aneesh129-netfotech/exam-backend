@@ -65,7 +65,11 @@ def register_socket_events(socketio: SocketIO):
                 row = res.data[0]
 
                 # Overwrite with latest totals from frontend                
-                numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
+                numeric_updates = {}
+                for col in VALID_COLUMNS:
+                    existing = row.get(col, 0)
+                    incoming = increments.get(col, 0)
+                    numeric_updates[col] = existing + incoming
 
                 # Update feedback summary (violations only)                
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
