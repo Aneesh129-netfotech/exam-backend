@@ -111,23 +111,42 @@ def submit_test():
         candidate_email = data.get("candidate_email")
 
         if not question_set_id or not candidate_email:
-            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400# ====== 🔹 Auto-calculate score ======        
+            return jsonify({"error": "Missing question_set_id or candidate_email"}), 400
+        # ====== 🔹 Auto-calculate score ======        
         answers = data.get("answers", [])
         questions = data.get("questions", [])
 
-        score = 0        
+        score = 0
         max_score = len(questions)
         total_questions = len(questions)
 
         if questions and answers:
-            for idx, q in enumerate(questions):     
+            for idx, q in enumerate(questions):
                 correct = q.get("answer") or q.get("correct_answer")
                 given = answers[idx] if idx < len(answers) else None
                 if given == correct:
                     score += 1
 
-        percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0       
-        violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+        percentage = round((score / max_score) * 100, 2) if max_score > 0 else 0.0
+
+        # ====== 🔹 Check if record exists ======
+        res = supabase.table("test_results") \
+            .select("*") \
+            .eq("question_set_id", question_set_id) \
+            .eq("candidate_email", candidate_email) \
+            .eq("exam_id", data.get("exam_id")) \
+            .limit(1) \
+            .execute()
+
+        incoming_violations = {col: data.get(col, 0) for col in VALID_COLUMNS}
+
+        if res.data:
+            row = res.data[0]
+            # ✅ accumulate violations instead of overwrite
+            violations = {col: row.get(col, 0) + incoming_violations.get(col, 0) for col in VALID_COLUMNS}
+        else:
+            violations = incoming_violations
+
         non_zero_violations = {k: v for k, v in violations.items() if v > 0}
 
         # ====== 🔹 Check if record exists ======        
