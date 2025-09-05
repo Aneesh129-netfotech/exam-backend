@@ -3,12 +3,8 @@ from flask_socketio import SocketIO
 from supabase import create_client
 from dotenv import load_dotenv
 import os
+from datetime import datetime
 import uuid
-
-from datetime import datetime, timezone
-
-def utc_now():
-    return datetime.now(timezone.utc).isoformat()
 
 load_dotenv()
 
@@ -23,12 +19,14 @@ VALID_COLUMNS = {
     "tab_switches",
     "inactivities",
     "face_not_visible",
+    "screenshot"
 }
 
 LEGACY_MAP = {
     "tab_switch": "tab_switches",
     "inactivity": "inactivities",
     "face_not_visible": "face_not_visible",
+    "screenshot": "screenshot",
 }
 
 def normalize_violations(data: dict) -> dict:
@@ -51,18 +49,15 @@ def register_socket_events(socketio: SocketIO):
 
             if not question_set_id or not candidate_email:
                 print("⚠️ Missing question_set_id or candidate_email")
-                return
-            # Only counts sent by frontend            
+                return# Only counts sent by frontend            
             increments = {col: data.get(col, 0) for col in VALID_COLUMNS}
             increments = {k: v for k, v in increments.items() if v > 0}
             if not increments:
-                return
-            # Find existing row            
+                return# Find existing row            
             res = supabase.table("test_results") \
                 .select("*") \
                 .eq("question_set_id", question_set_id) \
                 .eq("candidate_email", candidate_email) \
-                .eq("exam_id", data.get("exam_id")) \
                 .limit(1) \
                 .execute()
 
@@ -70,11 +65,7 @@ def register_socket_events(socketio: SocketIO):
                 row = res.data[0]
 
                 # Overwrite with latest totals from frontend                
-                numeric_updates = {}
-                for col in VALID_COLUMNS:
-                    existing = row.get(col, 0)
-                    incoming = increments.get(col, 0)
-                    numeric_updates[col] = existing + incoming
+                numeric_updates = {col: increments.get(col, 0) for col in VALID_COLUMNS}
 
                 # Update feedback summary (violations only)                
                 new_feedback = "Total Violations: " + ", ".join([f"{col}={val}" for col, val in numeric_updates.items()])
@@ -83,7 +74,7 @@ def register_socket_events(socketio: SocketIO):
                 supabase.table("test_results").update({
                     **numeric_updates,
                     "raw_feedback": new_feedback,
-                    "updated_at": utc_now(),
+                    "updated_at": datetime.utcnow().isoformat(),
                     "score": row.get("score", 0),
                     "max_score": row.get("max_score", 0),
                     "percentage": row.get("percentage", 0.0),
@@ -103,8 +94,8 @@ def register_socket_events(socketio: SocketIO):
                     "candidate_email": candidate_email,
                     "status": "Pending",
                     "raw_feedback": new_feedback,
-                    "created_at": utc_now(),
-                    "updated_at": utc_now(),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat(),
                     "evaluated_at": None,                   
                     **increments
                 }
